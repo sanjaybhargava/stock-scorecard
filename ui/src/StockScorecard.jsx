@@ -173,6 +173,9 @@ function mapTrade(t) {
     optionIncome: 0,
     dividend: 0,
     niftyReturn: t.nifty_return,
+    niftyBuyTri: t.nifty_buy_tri,
+    niftySellTri: t.nifty_sell_tri,
+    saleValue: t.invested + t.equity_gl,
     alpha: t.alpha,
   };
 }
@@ -231,52 +234,40 @@ export default function StockScorecard() {
     const panicSells = TRADES.filter(t => t.sellDate.slice(0, 7) === "2020-03");
     if (panicSells.length === 0) return null;
 
+    const panicProceeds = panicSells.reduce((s, t) => s + t.saleValue, 0);
     const panicLoss = panicSells.reduce((s, t) => s + t.equityGL, 0);
-    const panicInvested = panicSells.reduce((s, t) => s + t.invested, 0);
-    const panicTickers = new Set(panicSells.map(t => t.ticker));
 
-    // Find stocks that were panic-sold AND re-bought later
-    const postPanicByTicker = {};
-    TRADES.forEach(t => {
-      if (panicTickers.has(t.ticker) && t.buyDate > "2020-03-31") {
-        if (!postPanicByTicker[t.ticker]) postPanicByTicker[t.ticker] = [];
-        postPanicByTicker[t.ticker].push(t);
-      }
+    // Find exit TRI — use trades sold in Oct 2024 and Jan 2025 (final exits)
+    const octExits = TRADES.filter(t => t.sellDate.slice(0, 7) === "2024-10");
+    const janExits = TRADES.filter(t => t.sellDate.slice(0, 7) === "2025-01");
+    // Weighted average exit TRI
+    const octTri = octExits.length > 0 ? octExits[0].niftySellTri : 0;
+    const janTri = janExits.length > 0 ? janExits[0].niftySellTri : 0;
+    const octValue = octExits.reduce((s, t) => s + t.saleValue, 0);
+    const janValue = janExits.reduce((s, t) => s + t.saleValue, 0);
+    const exitValue = octValue + janValue;
+
+    // Grow each panic sell's proceeds by Nifty from sell date to blended exit
+    const exitTri = exitValue > 0 ? (octTri * octValue + janTri * janValue) / exitValue : octTri;
+    let grownValue = 0;
+    panicSells.forEach(t => {
+      grownValue += t.saleValue * (exitTri / t.niftySellTri);
     });
 
-    // Round-trip cost: sold low, rebought high
-    const roundTrips = [];
-    let totalSpreadCost = 0;
-    for (const ticker of [...panicTickers].sort()) {
-      const pTrades = panicSells.filter(t => t.ticker === ticker);
-      const rTrades = postPanicByTicker[ticker];
-      if (!rTrades || rTrades.length === 0) continue;
+    // User-provided adjustments
+    const expenses = 40000000;   // ₹4Cr withdrawn for expenses & other investments
+    const taxSaved = 5000000;    // ₹0.5Cr tax credit on booked losses
 
-      const pQty = pTrades.reduce((s, t) => s + t.quantity, 0);
-      const pSaleValue = pTrades.reduce((s, t) => s + t.invested + t.equityGL, 0);
-      const pAvgSell = pSaleValue / pQty;
-
-      const rQty = rTrades.reduce((s, t) => s + t.quantity, 0);
-      const rAvgBuy = rTrades.reduce((s, t) => s + t.invested, 0) / rQty;
-
-      const overlapQty = Math.min(pQty, rQty);
-      const spreadCost = (rAvgBuy - pAvgSell) * overlapQty;
-      if (spreadCost > 0) {
-        totalSpreadCost += spreadCost;
-        roundTrips.push({ ticker, qty: overlapQty, soldAt: pAvgSell, reboughtAt: rAvgBuy, cost: spreadCost });
-      }
-    }
-    roundTrips.sort((a, b) => b.cost - a.cost);
+    const netCost = grownValue - exitValue - expenses - taxSaved;
 
     return {
-      trades: panicSells.length,
-      invested: panicInvested,
-      loss: panicLoss,
-      spreadCost: totalSpreadCost,
-      totalCost: Math.abs(panicLoss) + totalSpreadCost,
-      roundTrips,
-      tickerCount: panicTickers.size,
-      reboughtCount: roundTrips.length,
+      panicProceeds,
+      panicLoss,
+      grownValue,
+      exitValue,
+      expenses,
+      taxSaved,
+      netCost,
     };
   }, [TRADES]);
 
@@ -471,69 +462,41 @@ export default function StockScorecard() {
 
             {/* Verdict */}
             <div className="bg-red-50 px-6 py-5 text-center border-b border-red-200">
-              <div className="text-sm text-red-800 mb-1">Did you panic?</div>
-              <div className="text-3xl font-bold text-red-700 mb-1">Yes</div>
-              <div className="text-sm text-red-600 mb-3">
-                {panicCost.trades} trades across {panicCost.tickerCount} stocks dumped in March 2020
-              </div>
+              <div className="text-sm text-red-800 mb-2">Did you panic?</div>
+              <div className="text-4xl font-bold text-red-700 mb-3">Yes</div>
               <div className="text-sm text-slate-600 mb-1">It cost you</div>
-              <div className="text-4xl font-bold text-red-700">{fmt(Math.round(panicCost.totalCost))}</div>
+              <div className="text-5xl font-bold text-red-700">{fmt(Math.round(panicCost.netCost))}</div>
             </div>
 
-            {/* Two components */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
-              <div className="px-5 py-4 text-center">
-                <div className="text-xs text-slate-400 uppercase tracking-wider mb-1">Realized Loss</div>
-                <div className="text-xl font-bold text-red-700">{fmt(Math.round(Math.abs(panicCost.loss)))}</div>
-                <div className="text-xs text-slate-500 mt-1">
-                  Sold {fmt(panicCost.invested)} of stocks at crash prices
+            {/* The math */}
+            <div className="px-6 py-5">
+              <div className="space-y-3 text-sm">
+                <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                  <span className="text-slate-600">You panic-sold in March 2020</span>
+                  <span className="font-semibold text-slate-900">{fmt(Math.round(panicCost.panicProceeds))}</span>
                 </div>
-              </div>
-              <div className="px-5 py-4 text-center">
-                <div className="text-xs text-slate-400 uppercase tracking-wider mb-1">Rebuy Premium</div>
-                <div className="text-xl font-bold text-red-700">{fmt(Math.round(panicCost.spreadCost))}</div>
-                <div className="text-xs text-slate-500 mt-1">
-                  {panicCost.reboughtCount} of {panicCost.tickerCount} stocks bought back at higher prices
+                <div className="flex justify-between items-center py-2 border-b border-slate-100">
+                  <span className="text-slate-600">If held in NIFTY 500 till you exited (Oct '24 / Jan '25)</span>
+                  <span className="font-bold text-emerald-700 text-lg">{fmt(Math.round(panicCost.grownValue))}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-slate-100 text-slate-500">
+                  <span>Less: what you actually got back at exit</span>
+                  <span>– {fmt(Math.round(panicCost.exitValue))}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-slate-100 text-slate-500">
+                  <span>Less: expenses & other investments</span>
+                  <span>– {fmt(panicCost.expenses)}</span>
+                </div>
+                <div className="flex justify-between items-center py-2 border-b border-slate-100 text-slate-500">
+                  <span>Less: tax saved on booked losses</span>
+                  <span>– {fmt(panicCost.taxSaved)}</span>
+                </div>
+                <div className="flex justify-between items-center py-3 bg-red-50 -mx-6 px-6 rounded">
+                  <span className="font-bold text-red-900">Net cost of panic</span>
+                  <span className="font-bold text-red-700 text-xl">{fmt(Math.round(panicCost.netCost))}</span>
                 </div>
               </div>
             </div>
-
-            {/* Round-trip table */}
-            {panicCost.roundTrips.length > 0 && (
-              <div className="border-t border-slate-200">
-                <div className="px-4 py-2 bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                  Sold Low, Rebought High
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="border-b border-slate-200">
-                        {["Stock", "Qty", "Panic Sell", "Rebuy Price", "Spread Cost"].map(h => (
-                          <th key={h} className="px-3 py-2 text-right first:text-left text-xs font-medium text-slate-400">{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {panicCost.roundTrips.map((rt, i) => (
-                        <tr key={rt.ticker} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
-                          <td className="px-3 py-1.5 text-left font-semibold text-slate-900">{rt.ticker}</td>
-                          <td className="px-3 py-1.5 text-right text-slate-600">{rt.qty.toLocaleString("en-IN")}</td>
-                          <td className="px-3 py-1.5 text-right text-red-600">{fmt(Math.round(rt.soldAt))}</td>
-                          <td className="px-3 py-1.5 text-right text-slate-600">{fmt(Math.round(rt.reboughtAt))}</td>
-                          <td className="px-3 py-1.5 text-right font-semibold text-red-700">{fmt(Math.round(rt.cost))}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="border-t-2 border-slate-300 bg-slate-100">
-                        <td colSpan={4} className="px-3 py-2 text-left font-bold text-slate-900">Total Spread Cost</td>
-                        <td className="px-3 py-2 text-right font-bold text-red-700">{fmt(Math.round(panicCost.spreadCost))}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
