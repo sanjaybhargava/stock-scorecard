@@ -93,18 +93,25 @@ const TradeDetail = ({ ticker, fy, type, trades, onBack }) => {
         </table>
       </div>
 
-      <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className={`mt-6 grid grid-cols-1 gap-4 ${hasBreakdown ? "md:grid-cols-5" : "md:grid-cols-3"}`}>
         <div className="bg-slate-50 rounded-lg p-4 text-center">
-          <div className="text-xs text-slate-500 mb-1">My Return</div>
-          <div className={`text-lg font-bold ${totalGL >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(totalGL)}</div>
-          {hasBreakdown && (
-            <div className="text-xs text-slate-400 mt-1">
-              Capital {fmt(Math.round(totalGL - totalOptionIncome - totalDividendIncome))}
-              {totalDividendIncome !== 0 && <span className="text-emerald-600"> +Div {fmt(totalDividendIncome)}</span>}
-              {totalOptionIncome !== 0 && <span className="text-emerald-600"> +F&O {fmt(totalOptionIncome)}</span>}
-            </div>
-          )}
+          <div className="text-xs text-slate-500 mb-1">{hasBreakdown ? "Capital G/L" : "My Return"}</div>
+          <div className={`text-lg font-bold ${(hasBreakdown ? totalGL - totalOptionIncome - totalDividendIncome : totalGL) >= 0 ? "text-emerald-700" : "text-red-700"}`}>
+            {fmt(Math.round(hasBreakdown ? totalGL - totalOptionIncome - totalDividendIncome : totalGL))}
+          </div>
         </div>
+        {totalDividendIncome !== 0 && (
+          <div className="bg-emerald-50 rounded-lg p-4 text-center">
+            <div className="text-xs text-slate-500 mb-1">Dividends</div>
+            <div className="text-lg font-bold text-emerald-700">{fmt(totalDividendIncome)}</div>
+          </div>
+        )}
+        {totalOptionIncome !== 0 && (
+          <div className="bg-emerald-50 rounded-lg p-4 text-center">
+            <div className="text-xs text-slate-500 mb-1">F&O Income</div>
+            <div className={`text-lg font-bold ${totalOptionIncome >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(totalOptionIncome)}</div>
+          </div>
+        )}
         <div className="bg-slate-50 rounded-lg p-4 text-center">
           <div className="text-xs text-slate-500 mb-1">NIFTY 500 Return</div>
           <div className="text-lg font-bold text-slate-700">{fmt(totalNifty)}</div>
