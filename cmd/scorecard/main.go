@@ -23,7 +23,7 @@ func main() {
 	outputPath := flag.String("output", "", "Path for output JSON file (required)")
 	dividendsPath := flag.String("dividends", "", "Path to dividends CSV (optional, from pull_dividends.py)")
 	fnoDir := flag.String("fno", "", "Directory containing F&O tradebook CSVs (optional)")
-	exclude := flag.String("exclude", "LIQUIDBEES,GOLDBEES", "Comma-separated symbols to skip")
+	exclude := flag.String("exclude", "LIQUIDBEES", "Comma-separated symbols to skip")
 	broker := flag.String("broker", "zerodha", "Broker format for parser selection")
 	verbose := flag.Bool("verbose", false, "Print per-symbol FIFO summary to stderr")
 

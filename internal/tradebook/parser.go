@@ -148,10 +148,6 @@ func parseFile(path string, excludes map[string]bool, seenTradeIDs map[string]bo
 		}
 
 		isin := strings.TrimSpace(record[1])
-		// Skip ETFs and mutual funds (ISIN prefix INF vs INE for equities)
-		if strings.HasPrefix(isin, "INF") {
-			continue
-		}
 
 		tradeID := strings.TrimSpace(record[10])
 		dedupKey := symbol + "|" + tradeID

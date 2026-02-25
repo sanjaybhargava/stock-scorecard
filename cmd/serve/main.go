@@ -40,7 +40,7 @@ var embeddedUI embed.FS
 func main() {
 	dir := flag.String("dir", "", "Directory containing tradebook CSVs and TRI file (default: ~/Downloads)")
 	port := flag.Int("port", 0, "Port to serve on (default: auto-select)")
-	exclude := flag.String("exclude", "LIQUIDBEES,GOLDBEES", "Comma-separated symbols to skip")
+	exclude := flag.String("exclude", "LIQUIDBEES", "Comma-separated symbols to skip")
 	noBrowser := flag.Bool("no-browser", false, "Don't auto-open the browser")
 	flag.Parse()
 
