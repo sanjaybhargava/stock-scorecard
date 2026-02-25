@@ -255,7 +255,7 @@ export default function StockScorecard() {
     });
 
     // User-provided adjustments
-    const expenses = 40000000;   // ₹4Cr withdrawn for expenses & other investments
+    const expenses = 20000000;   // ₹2Cr withdrawn for expenses & other investments
     const taxSaved = 5000000;    // ₹0.5Cr tax credit on booked losses
 
     const netCost = grownValue - exitValue - expenses - taxSaved;
