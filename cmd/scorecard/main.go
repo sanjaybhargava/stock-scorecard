@@ -4,10 +4,12 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"strings"
 
 	"stock-scorecard/internal/dividend"
+	"stock-scorecard/internal/fno"
 	"stock-scorecard/internal/matcher"
 	"stock-scorecard/internal/output"
 	"stock-scorecard/internal/scorer"
@@ -20,6 +22,7 @@ func main() {
 	triPath := flag.String("tri", "", "Path to NIFTY 500 TRI Indexed CSV file (required)")
 	outputPath := flag.String("output", "", "Path for output JSON file (required)")
 	dividendsPath := flag.String("dividends", "", "Path to dividends CSV (optional, from pull_dividends.py)")
+	fnoDir := flag.String("fno", "", "Directory containing F&O tradebook CSVs (optional)")
 	exclude := flag.String("exclude", "LIQUIDBEES,GOLDBEES", "Comma-separated symbols to skip")
 	broker := flag.String("broker", "zerodha", "Broker format for parser selection")
 	verbose := flag.Bool("verbose", false, "Print per-symbol FIFO summary to stderr")
@@ -78,12 +81,35 @@ func main() {
 		fmt.Fprintln(os.Stderr)
 	}
 
+	// Step 3b: F&O option income attribution (optional)
+	var unattributedFnO []fno.UnattributedFnO
+	if *fnoDir != "" {
+		fnoTrades, err := fno.ParseDirectory(*fnoDir)
+		if err != nil {
+			log.Fatalf("parse F&O tradebooks: %v", err)
+		}
+		log.Printf("Parsed %d consolidated F&O trades", len(fnoTrades))
+
+		contracts := fno.ComputeContractPnLs(fnoTrades)
+		attribution, unattrib := fno.Attribute(contracts, realized)
+		unattributedFnO = unattrib
+
+		// Apply option income to realized trades
+		for idx, amount := range attribution {
+			rounded := math.Round(amount)
+			realized[idx].OptionIncome += rounded
+			realized[idx].EquityGL += rounded
+		}
+	} else {
+		log.Printf("Note: run with --fno for total return including F&O option income")
+	}
+
 	// Step 4: Score
 	summary := scorer.Score(realized)
 	log.Printf("Win rate: %d%%, Net alpha: ₹%d", summary.WinRate, int(summary.NetAlpha))
 
 	// Step 5: Write JSON
-	if err := output.WriteJSON(*outputPath, realized, open, warnings, summary); err != nil {
+	if err := output.WriteJSON(*outputPath, realized, open, warnings, summary, unattributedFnO); err != nil {
 		log.Fatalf("write JSON: %v", err)
 	}
 	log.Printf("Wrote scorecard to %s", *outputPath)

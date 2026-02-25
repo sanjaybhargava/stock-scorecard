@@ -24,8 +24,9 @@ type RealizedTrade struct {
 	SellPrice   float64
 	Invested    float64 // Quantity x BuyPrice
 	SaleValue   float64 // Quantity x SellPrice
-	EquityGL       float64 // SaleValue - Invested + DividendIncome
+	EquityGL       float64 // SaleValue - Invested + DividendIncome + OptionIncome
 	DividendIncome float64 // dividend income during holding period (also included in EquityGL)
+	OptionIncome   float64 // F&O option income attributed to this trade (also included in EquityGL)
 	NiftyBuy       float64 // TRI on buy date
 	NiftySell   float64 // TRI on sell date
 	NiftyReturn float64 // Invested x (NiftySell/NiftyBuy - 1)

@@ -34,7 +34,10 @@ const TradeDetail = ({ ticker, fy, type, trades, onBack }) => {
   const totalInvested = trades.reduce((s, t) => s + t.invested, 0);
   const totalGL = trades.reduce((s, t) => s + t.equityGL, 0);
   const totalNifty = trades.reduce((s, t) => s + t.niftyReturn, 0);
+  const totalOptionIncome = trades.reduce((s, t) => s + (t.optionIncome || 0), 0);
+  const totalDividendIncome = trades.reduce((s, t) => s + (t.dividendIncome || 0), 0);
   const alpha = totalGL - totalNifty;
+  const hasBreakdown = totalOptionIncome !== 0 || totalDividendIncome !== 0;
 
   return (
     <div>
@@ -51,7 +54,7 @@ const TradeDetail = ({ ticker, fy, type, trades, onBack }) => {
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-slate-800 text-white">
-              {["Buy Date", "Sell Date", "Days", "Qty", "Invested", "Equity G/L", "Nifty Return", "Alpha"].map(h => (
+              {["Buy Date", "Sell Date", "Days", "Qty", "Invested", "Total G/L", "Nifty Return", "Alpha"].map(h => (
                 <th key={h} className="px-3 py-2 text-right first:text-left font-medium">{h}</th>
               ))}
             </tr>
@@ -59,7 +62,10 @@ const TradeDetail = ({ ticker, fy, type, trades, onBack }) => {
           <tbody>
             {trades.map((t, i) => {
               const tradeAlpha = t.equityGL - t.niftyReturn;
-              return (
+              const hasFnO = (t.optionIncome || 0) !== 0;
+              const hasDiv = (t.dividendIncome || 0) !== 0;
+              const capitalGL = t.equityGL - (t.optionIncome || 0) - (t.dividendIncome || 0);
+              return (<>
                 <tr key={i} className={i % 2 === 0 ? "bg-slate-50" : "bg-white"}>
                   <td className="px-3 py-2 text-left font-mono text-xs">{t.buyDate}</td>
                   <td className="px-3 py-2 text-right font-mono text-xs">{t.sellDate}</td>
@@ -70,7 +76,18 @@ const TradeDetail = ({ ticker, fy, type, trades, onBack }) => {
                   <td className="px-3 py-2 text-right text-slate-600">{fmt(t.niftyReturn)}</td>
                   <td className={`px-3 py-2 text-right font-semibold ${tradeAlpha >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(tradeAlpha)}</td>
                 </tr>
-              );
+                {(hasFnO || hasDiv) && (
+                  <tr key={`${i}-breakdown`} className={i % 2 === 0 ? "bg-slate-50" : "bg-white"}>
+                    <td colSpan={5} />
+                    <td className="px-3 pb-2 text-right text-xs text-slate-400">
+                      <span className="text-slate-500">Capital {fmt(Math.round(capitalGL))}</span>
+                      {hasDiv && <span className="ml-2 text-emerald-600">+Div {fmt(t.dividendIncome)}</span>}
+                      {hasFnO && <span className={`ml-2 ${t.optionIncome >= 0 ? "text-blue-600" : "text-red-600"}`}>{t.optionIncome >= 0 ? "+" : ""}F&O {fmt(t.optionIncome)}</span>}
+                    </td>
+                    <td colSpan={2} />
+                  </tr>
+                )}
+              </>);
             })}
           </tbody>
         </table>
@@ -80,6 +97,13 @@ const TradeDetail = ({ ticker, fy, type, trades, onBack }) => {
         <div className="bg-slate-50 rounded-lg p-4 text-center">
           <div className="text-xs text-slate-500 mb-1">My Return</div>
           <div className={`text-lg font-bold ${totalGL >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(totalGL)}</div>
+          {hasBreakdown && (
+            <div className="text-xs text-slate-400 mt-1">
+              Capital {fmt(Math.round(totalGL - totalOptionIncome - totalDividendIncome))}
+              {totalDividendIncome !== 0 && <span className="text-emerald-600"> +Div {fmt(totalDividendIncome)}</span>}
+              {totalOptionIncome !== 0 && <span className="text-blue-600"> +F&O {fmt(totalOptionIncome)}</span>}
+            </div>
+          )}
         </div>
         <div className="bg-slate-50 rounded-lg p-4 text-center">
           <div className="text-xs text-slate-500 mb-1">NIFTY 500 Return</div>
@@ -170,6 +194,8 @@ function mapTrade(t) {
     quantity: t.quantity,
     invested: t.invested,
     equityGL: t.equity_gl,
+    optionIncome: t.option_income || 0,
+    dividendIncome: t.dividend_income || 0,
     niftyReturn: t.nifty_return,
     niftyBuyTri: t.nifty_buy_tri,
     niftySellTri: t.nifty_sell_tri,
@@ -218,6 +244,14 @@ export default function StockScorecard() {
     const byFy = {};
     (ds.by_fy || []).forEach(d => { byFy[d.fy] = d.dividend_income; });
     return { total: ds.total_dividend_income || 0, byFy };
+  }, [rawData]);
+
+  const fnoSummary = useMemo(() => {
+    if (!rawData || !rawData.fno_summary) return null;
+    const fs = rawData.fno_summary;
+    const byFy = {};
+    (fs.by_fy || []).forEach(d => { byFy[d.fy] = d.option_income; });
+    return { total: fs.total_option_income || 0, unattributed: fs.unattributed || 0, byFy };
   }, [rawData]);
 
   const summary = useMemo(() => {
@@ -434,6 +468,13 @@ export default function StockScorecard() {
                   <div className="text-white/40 text-xs">while held</div>
                 </div>
               )}
+              {fnoSummary && fnoSummary.total !== 0 && (
+                <div className="text-center">
+                  <div className="text-white/50">F&O Income</div>
+                  <div className={`font-bold ${fnoSummary.total >= 0 ? "text-blue-400" : "text-red-400"}`}>{fmt(fnoSummary.total)}</div>
+                  <div className="text-white/40 text-xs">option premium</div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -470,6 +511,9 @@ export default function StockScorecard() {
                     {isFirstOfFY && dividendSummary && dividendSummary.byFy[s.fy] > 0 && (
                       <span className="text-xs text-emerald-700 font-semibold hidden sm:inline">+{fmt(dividendSummary.byFy[s.fy])} div</span>
                     )}
+                    {isFirstOfFY && fnoSummary && fnoSummary.byFy[s.fy] && fnoSummary.byFy[s.fy] !== 0 && (
+                      <span className={`text-xs font-semibold hidden sm:inline ${fnoSummary.byFy[s.fy] >= 0 ? "text-blue-700" : "text-red-700"}`}>{fnoSummary.byFy[s.fy] >= 0 ? "+" : ""}{fmt(fnoSummary.byFy[s.fy])} F&O</span>
+                    )}
                     <AlphaChip value={s.alpha} size="sm" />
                     <PassFail pass={isPass} />
                     <span className="text-slate-300 text-sm">→</span>
@@ -488,6 +532,9 @@ export default function StockScorecard() {
             <div className="flex items-center gap-3">
               {dividendSummary && dividendSummary.total > 0 && (
                 <span className="text-xs text-emerald-700 font-semibold">+{fmt(dividendSummary.total)} div</span>
+              )}
+              {fnoSummary && fnoSummary.total !== 0 && (
+                <span className={`text-xs font-semibold ${fnoSummary.total >= 0 ? "text-blue-700" : "text-red-700"}`}>{fnoSummary.total >= 0 ? "+" : ""}{fmt(fnoSummary.total)} F&O</span>
               )}
               <AlphaChip value={totals.all.alpha} size="md" />
             </div>

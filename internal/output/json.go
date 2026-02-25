@@ -8,18 +8,41 @@ import (
 	"sort"
 	"time"
 
+	"stock-scorecard/internal/fno"
 	"stock-scorecard/internal/matcher"
 	"stock-scorecard/internal/scorer"
 )
 
 // Scorecard is the top-level JSON output structure.
 type Scorecard struct {
-	GeneratedAt     string              `json:"generated_at"`
-	Trades          []TradeJSON         `json:"trades"`
-	OpenPositions   []OpenJSON          `json:"open_positions"`
-	Warnings        []WarningJSON       `json:"warnings"`
-	Summary         SummaryJSON         `json:"summary"`
-	DividendSummary *DividendSummJSON   `json:"dividend_summary,omitempty"`
+	GeneratedAt      string              `json:"generated_at"`
+	Trades           []TradeJSON         `json:"trades"`
+	OpenPositions    []OpenJSON          `json:"open_positions"`
+	Warnings         []WarningJSON       `json:"warnings"`
+	Summary          SummaryJSON         `json:"summary"`
+	DividendSummary  *DividendSummJSON   `json:"dividend_summary,omitempty"`
+	FnOSummary       *FnOSummJSON        `json:"fno_summary,omitempty"`
+	UnattributedFnO  []UnattributedJSON  `json:"unattributed_fno,omitempty"`
+}
+
+// FnOSummJSON is the JSON representation of the F&O option income summary.
+type FnOSummJSON struct {
+	TotalOptionIncome int           `json:"total_option_income"`
+	Unattributed      int           `json:"unattributed"`
+	ByFY              []FnOFYJSON   `json:"by_fy"`
+}
+
+// FnOFYJSON is a per-FY F&O option income total.
+type FnOFYJSON struct {
+	FY           string `json:"fy"`
+	OptionIncome int    `json:"option_income"`
+}
+
+// UnattributedJSON represents F&O income that couldn't be attributed to any equity trade.
+type UnattributedJSON struct {
+	Underlying string `json:"underlying"`
+	NetPnL     int    `json:"net_pnl"`
+	Note       string `json:"note"`
 }
 
 // DividendSummJSON is the JSON representation of the dividend summary.
@@ -56,8 +79,10 @@ type TradeJSON struct {
 	SellPrice    float64 `json:"sell_price"`
 	Invested     int     `json:"invested"`
 	SaleValue    int     `json:"sale_value"`
-	EquityGL     int     `json:"equity_gl"`
-	NiftyBuyTRI  float64 `json:"nifty_buy_tri"`
+	EquityGL       int     `json:"equity_gl"`
+	DividendIncome int     `json:"dividend_income,omitempty"`
+	OptionIncome   int     `json:"option_income,omitempty"`
+	NiftyBuyTRI    float64 `json:"nifty_buy_tri"`
 	NiftySellTRI float64 `json:"nifty_sell_tri"`
 	NiftyReturn  int     `json:"nifty_return"`
 	Alpha        int     `json:"alpha"`
@@ -96,7 +121,7 @@ type FYSummJSON struct {
 }
 
 // WriteJSON serializes the scorecard to a JSON file.
-func WriteJSON(path string, trades []matcher.RealizedTrade, open []matcher.OpenPosition, warnings []matcher.Warning, summary scorer.Summary) error {
+func WriteJSON(path string, trades []matcher.RealizedTrade, open []matcher.OpenPosition, warnings []matcher.Warning, summary scorer.Summary, unattributedFnO []fno.UnattributedFnO) error {
 	sc := Scorecard{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -117,8 +142,10 @@ func WriteJSON(path string, trades []matcher.RealizedTrade, open []matcher.OpenP
 			SellPrice:    roundTo2(t.SellPrice),
 			Invested:     int(t.Invested),
 			SaleValue:    int(t.SaleValue),
-			EquityGL:     int(t.EquityGL),
-			NiftyBuyTRI:  roundTo2(t.NiftyBuy),
+			EquityGL:       int(t.EquityGL),
+			DividendIncome: int(math.Round(t.DividendIncome)),
+			OptionIncome:   int(math.Round(t.OptionIncome)),
+			NiftyBuyTRI:    roundTo2(t.NiftyBuy),
 			NiftySellTRI: roundTo2(t.NiftySell),
 			NiftyReturn:  int(t.NiftyReturn),
 			Alpha:        alpha,
@@ -174,6 +201,9 @@ func WriteJSON(path string, trades []matcher.RealizedTrade, open []matcher.OpenP
 
 	// Build dividend summary if any trade has dividend income
 	sc.DividendSummary = buildDividendSummary(trades)
+
+	// Build F&O summary and unattributed list
+	sc.FnOSummary, sc.UnattributedFnO = buildFnOSummary(trades, unattributedFnO)
 
 	data, err := json.MarshalIndent(sc, "", "  ")
 	if err != nil {
@@ -232,6 +262,43 @@ func dividendFY(d time.Time) string {
 		y--
 	}
 	return fmt.Sprintf("FY %d-%02d", y, (y+1)%100)
+}
+
+// buildFnOSummary aggregates F&O option income by FY and converts unattributed entries.
+// Returns nil summary if no option income exists and no unattributed entries.
+func buildFnOSummary(trades []matcher.RealizedTrade, unattributedFnO []fno.UnattributedFnO) (*FnOSummJSON, []UnattributedJSON) {
+	totalOption, byFYList := fno.BuildFnOSummary(trades)
+
+	totalUnattrib := 0.0
+	for _, u := range unattributedFnO {
+		totalUnattrib += u.NetPnL
+	}
+
+	if totalOption == 0 && len(unattributedFnO) == 0 {
+		return nil, nil
+	}
+
+	summary := &FnOSummJSON{
+		TotalOptionIncome: int(math.Round(totalOption)),
+		Unattributed:      int(math.Round(totalUnattrib)),
+	}
+	for _, fy := range byFYList {
+		summary.ByFY = append(summary.ByFY, FnOFYJSON{
+			FY:           fy.FY,
+			OptionIncome: int(math.Round(fy.OptionIncome)),
+		})
+	}
+
+	var unattribJSON []UnattributedJSON
+	for _, u := range unattributedFnO {
+		unattribJSON = append(unattribJSON, UnattributedJSON{
+			Underlying: u.Underlying,
+			NetPnL:     int(math.Round(u.NetPnL)),
+			Note:       u.Note,
+		})
+	}
+
+	return summary, unattribJSON
 }
 
 func roundTo2(v float64) float64 {
