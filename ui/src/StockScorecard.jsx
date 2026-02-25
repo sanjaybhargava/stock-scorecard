@@ -226,6 +226,32 @@ export default function StockScorecard() {
       .sort((a, b) => b.fy.localeCompare(a.fy) || a.type.localeCompare(b.type));
   }, [TRADES]);
 
+  const monthlyData = useMemo(() => {
+    const byMonth = {};
+    TRADES.forEach(t => {
+      const bm = t.buyDate.slice(0, 7);
+      if (!byMonth[bm]) byMonth[bm] = { invested: 0, trades: 0, gl: 0, nifty: 0 };
+      byMonth[bm].invested += t.invested;
+      byMonth[bm].trades += 1;
+      byMonth[bm].gl += t.equityGL;
+      byMonth[bm].nifty += t.niftyReturn;
+    });
+    // Fill gaps so chart is continuous
+    const months = Object.keys(byMonth).sort();
+    if (months.length === 0) return [];
+    const result = [];
+    let [y, m] = months[0].split("-").map(Number);
+    const [ey, em] = months[months.length - 1].split("-").map(Number);
+    while (y < ey || (y === ey && m <= em)) {
+      const key = `${y}-${String(m).padStart(2, "0")}`;
+      const d = byMonth[key] || { invested: 0, trades: 0, gl: 0, nifty: 0 };
+      result.push({ month: key, ...d, alpha: d.gl - d.nifty });
+      m++;
+      if (m > 12) { m = 1; y++; }
+    }
+    return result;
+  }, [TRADES]);
+
   const tickerRankings = useMemo(() => {
     const byTicker = {};
     TRADES.forEach(t => {
@@ -407,6 +433,48 @@ export default function StockScorecard() {
             </div>
           </div>
         </div>
+
+        {/* Monthly Capital Deployed */}
+        {monthlyData.length > 0 && (() => {
+          const maxInvested = Math.max(...monthlyData.map(d => d.invested));
+          return (
+            <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+              <div className="px-4 py-3 bg-slate-800">
+                <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Capital Deployed by Month</h2>
+              </div>
+              <div className="px-4 py-4">
+                <div className="space-y-0.5">
+                  {monthlyData.map(d => {
+                    const pct = maxInvested > 0 ? (d.invested / maxInvested) * 100 : 0;
+                    const alpha = d.gl - d.nifty;
+                    const isLoss = alpha < 0 && d.invested > 0;
+                    const monthLabel = d.month.slice(2).replace("-", "/");
+                    return (
+                      <div key={d.month} className="flex items-center gap-2 group">
+                        <span className="text-[10px] font-mono text-slate-400 w-12 text-right shrink-0">{monthLabel}</span>
+                        <div className="flex-1 h-4 relative">
+                          {pct > 0 && (
+                            <div
+                              className={`h-full rounded-sm ${isLoss ? "bg-red-400" : d.invested > 0 ? "bg-emerald-400" : "bg-slate-100"}`}
+                              style={{ width: `${Math.max(pct, 1)}%` }}
+                            />
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400 w-16 text-right shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                          {d.invested > 0 ? fmt(d.invested) : ""}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center gap-4 mt-3 text-[10px] text-slate-400 justify-end">
+                  <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-emerald-400 inline-block" /> +ve alpha</div>
+                  <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-400 inline-block" /> -ve alpha</div>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Winners & Losers */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
