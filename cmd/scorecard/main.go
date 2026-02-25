@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"stock-scorecard/internal/dividend"
 	"stock-scorecard/internal/matcher"
 	"stock-scorecard/internal/output"
 	"stock-scorecard/internal/scorer"
@@ -18,6 +19,7 @@ func main() {
 	tradebooksDir := flag.String("tradebooks", "", "Directory containing Zerodha tradebook CSV files (required)")
 	triPath := flag.String("tri", "", "Path to NIFTY 500 TRI Indexed CSV file (required)")
 	outputPath := flag.String("output", "", "Path for output JSON file (required)")
+	dividendsPath := flag.String("dividends", "", "Path to dividends CSV (optional, from pull_dividends.py)")
 	exclude := flag.String("exclude", "LIQUIDBEES,GOLDBEES", "Comma-separated symbols to skip")
 	broker := flag.String("broker", "zerodha", "Broker format for parser selection")
 	verbose := flag.Bool("verbose", false, "Print per-symbol FIFO summary to stderr")
@@ -48,8 +50,19 @@ func main() {
 	}
 	log.Printf("Loaded TRI index")
 
+	// Step 2b: Load dividends (optional)
+	var divIdx *dividend.DividendIndex
+	if *dividendsPath != "" {
+		divIdx, err = dividend.LoadDividends(*dividendsPath)
+		if err != nil {
+			log.Fatalf("load dividends: %v", err)
+		}
+	} else {
+		log.Printf("Note: run with --dividends for total return including dividend income")
+	}
+
 	// Step 3: FIFO matching
-	realized, open, summaries, warnings, err := matcher.Match(trades, triIdx)
+	realized, open, summaries, warnings, err := matcher.Match(trades, triIdx, divIdx)
 	if err != nil {
 		log.Fatalf("FIFO match: %v", err)
 	}

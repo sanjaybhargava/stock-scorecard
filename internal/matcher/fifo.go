@@ -7,6 +7,7 @@ import (
 	"sort"
 	"time"
 
+	"stock-scorecard/internal/dividend"
 	"stock-scorecard/internal/tradebook"
 	"stock-scorecard/internal/tri"
 )
@@ -23,8 +24,9 @@ type RealizedTrade struct {
 	SellPrice   float64
 	Invested    float64 // Quantity x BuyPrice
 	SaleValue   float64 // Quantity x SellPrice
-	EquityGL    float64 // SaleValue - Invested
-	NiftyBuy    float64 // TRI on buy date
+	EquityGL       float64 // SaleValue - Invested + DividendIncome
+	DividendIncome float64 // dividend income during holding period (also included in EquityGL)
+	NiftyBuy       float64 // TRI on buy date
 	NiftySell   float64 // TRI on sell date
 	NiftyReturn float64 // Invested x (NiftySell/NiftyBuy - 1)
 	FY          string  // FY of sell date, e.g. "FY 2024-25"
@@ -291,7 +293,7 @@ func injectManualTrades(trades []tradebook.ConsolidatedTrade) []tradebook.Consol
 
 // Match performs FIFO matching on consolidated trades, enriches with TRI data,
 // and returns realized trades, open positions, and per-symbol summaries.
-func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]RealizedTrade, []OpenPosition, []SymbolSummary, []Warning, error) {
+func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex, divIdx *dividend.DividendIndex) ([]RealizedTrade, []OpenPosition, []SymbolSummary, []Warning, error) {
 	// Apply corporate action adjustments and manual entries before grouping
 	trades = applySplits(trades)
 	trades = applyDemergers(trades)
@@ -364,7 +366,7 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]Realiz
 						displaySymbol, isin,
 						lot.date, lot.price,
 						t.Date, t.AvgPrice,
-						matchQty, triIdx,
+						matchQty, triIdx, divIdx,
 					)
 					if err != nil {
 						return nil, nil, nil, nil, fmt.Errorf("enrich %s: %w", displaySymbol, err)
@@ -422,7 +424,7 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]Realiz
 	return allRealized, allOpen, summaries, warnings, nil
 }
 
-func buildRealizedTrade(symbol, isin string, buyDate time.Time, buyPrice float64, sellDate time.Time, sellPrice float64, qty float64, triIdx *tri.TRIIndex) (RealizedTrade, error) {
+func buildRealizedTrade(symbol, isin string, buyDate time.Time, buyPrice float64, sellDate time.Time, sellPrice float64, qty float64, triIdx *tri.TRIIndex, divIdx *dividend.DividendIndex) (RealizedTrade, error) {
 	niftyBuy, err := triIdx.Lookup(buyDate.Format("2006-01-02"))
 	if err != nil {
 		return RealizedTrade{}, fmt.Errorf("TRI lookup buy %s: %w", buyDate.Format("2006-01-02"), err)
@@ -438,28 +440,39 @@ func buildRealizedTrade(symbol, isin string, buyDate time.Time, buyPrice float64
 	niftyReturn := invested * (niftySell/niftyBuy - 1)
 	holdDays := int(sellDate.Sub(buyDate).Hours() / 24)
 
+	var dividendIncome float64
+	if divIdx != nil {
+		divPerShare := divIdx.Lookup(symbol, buyDate, sellDate)
+		dividendIncome = qty * divPerShare
+		equityGL += dividendIncome
+		if dividendIncome > 0 {
+			log.Printf("  %s: +%.0f dividend (%.0f shares x %.2f/share)", symbol, dividendIncome, qty, divPerShare)
+		}
+	}
+
 	tradeType := "Short"
 	if holdDays > 365 {
 		tradeType = "Long"
 	}
 
 	return RealizedTrade{
-		Symbol:      symbol,
-		ISIN:        isin,
-		BuyDate:     buyDate,
-		SellDate:    sellDate,
-		HoldDays:    holdDays,
-		Quantity:    qty,
-		BuyPrice:    buyPrice,
-		SellPrice:   sellPrice,
-		Invested:    math.Round(invested),
-		SaleValue:   math.Round(saleValue),
-		EquityGL:    math.Round(equityGL),
-		NiftyBuy:    niftyBuy,
-		NiftySell:   niftySell,
-		NiftyReturn: math.Round(niftyReturn),
-		FY:          fiscalYear(sellDate),
-		Type:        tradeType,
+		Symbol:         symbol,
+		ISIN:           isin,
+		BuyDate:        buyDate,
+		SellDate:       sellDate,
+		HoldDays:       holdDays,
+		Quantity:       qty,
+		BuyPrice:       buyPrice,
+		SellPrice:      sellPrice,
+		Invested:       math.Round(invested),
+		SaleValue:      math.Round(saleValue),
+		EquityGL:       math.Round(equityGL),
+		DividendIncome: math.Round(dividendIncome),
+		NiftyBuy:       niftyBuy,
+		NiftySell:      niftySell,
+		NiftyReturn:    math.Round(niftyReturn),
+		FY:             fiscalYear(sellDate),
+		Type:           tradeType,
 	}, nil
 }
 

@@ -3,7 +3,9 @@ package output
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
+	"sort"
 	"time"
 
 	"stock-scorecard/internal/matcher"
@@ -12,11 +14,24 @@ import (
 
 // Scorecard is the top-level JSON output structure.
 type Scorecard struct {
-	GeneratedAt   string          `json:"generated_at"`
-	Trades        []TradeJSON     `json:"trades"`
-	OpenPositions []OpenJSON      `json:"open_positions"`
-	Warnings      []WarningJSON   `json:"warnings"`
-	Summary       SummaryJSON     `json:"summary"`
+	GeneratedAt     string              `json:"generated_at"`
+	Trades          []TradeJSON         `json:"trades"`
+	OpenPositions   []OpenJSON          `json:"open_positions"`
+	Warnings        []WarningJSON       `json:"warnings"`
+	Summary         SummaryJSON         `json:"summary"`
+	DividendSummary *DividendSummJSON   `json:"dividend_summary,omitempty"`
+}
+
+// DividendSummJSON is the JSON representation of the dividend summary.
+type DividendSummJSON struct {
+	TotalDividendIncome int              `json:"total_dividend_income"`
+	ByFY                []DividendFYJSON `json:"by_fy"`
+}
+
+// DividendFYJSON is a per-FY dividend income total.
+type DividendFYJSON struct {
+	FY             string `json:"fy"`
+	DividendIncome int    `json:"dividend_income"`
 }
 
 // WarningJSON represents an unmatched sell in the output.
@@ -157,6 +172,9 @@ func WriteJSON(path string, trades []matcher.RealizedTrade, open []matcher.OpenP
 		}
 	}
 
+	// Build dividend summary if any trade has dividend income
+	sc.DividendSummary = buildDividendSummary(trades)
+
 	data, err := json.MarshalIndent(sc, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal JSON: %w", err)
@@ -167,6 +185,53 @@ func WriteJSON(path string, trades []matcher.RealizedTrade, open []matcher.OpenP
 	}
 
 	return nil
+}
+
+// buildDividendSummary aggregates dividend income by FY (based on sell date).
+// Returns nil if no dividend income exists.
+func buildDividendSummary(trades []matcher.RealizedTrade) *DividendSummJSON {
+	totalDiv := 0.0
+	byFY := make(map[string]float64)
+
+	for _, t := range trades {
+		if t.DividendIncome > 0 {
+			totalDiv += t.DividendIncome
+			fy := dividendFY(t.SellDate)
+			byFY[fy] += t.DividendIncome
+		}
+	}
+
+	if totalDiv == 0 {
+		return nil
+	}
+
+	// Sort FYs
+	fys := make([]string, 0, len(byFY))
+	for fy := range byFY {
+		fys = append(fys, fy)
+	}
+	sort.Strings(fys)
+
+	result := &DividendSummJSON{
+		TotalDividendIncome: int(math.Round(totalDiv)),
+	}
+	for _, fy := range fys {
+		result.ByFY = append(result.ByFY, DividendFYJSON{
+			FY:             fy,
+			DividendIncome: int(math.Round(byFY[fy])),
+		})
+	}
+
+	return result
+}
+
+// dividendFY returns "FY YYYY-YY" based on date (Apr-Mar fiscal year).
+func dividendFY(d time.Time) string {
+	y := d.Year()
+	if d.Month() < 4 {
+		y--
+	}
+	return fmt.Sprintf("FY %d-%02d", y, (y+1)%100)
 }
 
 func roundTo2(v float64) float64 {
