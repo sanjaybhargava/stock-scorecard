@@ -15,7 +15,17 @@ type Scorecard struct {
 	GeneratedAt   string          `json:"generated_at"`
 	Trades        []TradeJSON     `json:"trades"`
 	OpenPositions []OpenJSON      `json:"open_positions"`
+	Warnings      []WarningJSON   `json:"warnings"`
 	Summary       SummaryJSON     `json:"summary"`
+}
+
+// WarningJSON represents an unmatched sell in the output.
+type WarningJSON struct {
+	Ticker    string `json:"ticker"`
+	SellDate  string `json:"sell_date"`
+	Unmatched int    `json:"unmatched_shares"`
+	Total     int    `json:"total_shares"`
+	Message   string `json:"message"`
 }
 
 // TradeJSON is the JSON representation of a realized trade.
@@ -71,7 +81,7 @@ type FYSummJSON struct {
 }
 
 // WriteJSON serializes the scorecard to a JSON file.
-func WriteJSON(path string, trades []matcher.RealizedTrade, open []matcher.OpenPosition, summary scorer.Summary) error {
+func WriteJSON(path string, trades []matcher.RealizedTrade, open []matcher.OpenPosition, warnings []matcher.Warning, summary scorer.Summary) error {
 	sc := Scorecard{
 		GeneratedAt: time.Now().UTC().Format(time.RFC3339),
 	}
@@ -110,6 +120,18 @@ func WriteJSON(path string, trades []matcher.RealizedTrade, open []matcher.OpenP
 			BuyPrice: roundTo2(o.BuyPrice),
 			Invested: int(o.Invested),
 			Note:     "No matching sell — still held",
+		}
+	}
+
+	// Convert warnings
+	sc.Warnings = make([]WarningJSON, len(warnings))
+	for i, w := range warnings {
+		sc.Warnings[i] = WarningJSON{
+			Ticker:    w.Symbol,
+			SellDate:  w.SellDate,
+			Unmatched: int(w.Unmatched),
+			Total:     int(w.Total),
+			Message:   w.Message,
 		}
 	}
 

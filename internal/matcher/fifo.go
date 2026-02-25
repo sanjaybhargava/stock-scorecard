@@ -50,6 +50,15 @@ type SymbolSummary struct {
 	SharesOpen    float64
 }
 
+// Warning represents an unmatched sell (pre-account holding or missing buy data).
+type Warning struct {
+	Symbol    string
+	SellDate  string
+	Unmatched float64
+	Total     float64
+	Message   string
+}
+
 // buyLot is an internal struct for the FIFO queue.
 type buyLot struct {
 	date    time.Time
@@ -98,7 +107,7 @@ func applySplits(trades []tradebook.ConsolidatedTrade) []tradebook.ConsolidatedT
 
 // Match performs FIFO matching on consolidated trades, enriches with TRI data,
 // and returns realized trades, open positions, and per-symbol summaries.
-func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]RealizedTrade, []OpenPosition, []SymbolSummary, error) {
+func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]RealizedTrade, []OpenPosition, []SymbolSummary, []Warning, error) {
 	// Apply stock split adjustments before grouping
 	trades = applySplits(trades)
 
@@ -127,6 +136,7 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]Realiz
 	var allRealized []RealizedTrade
 	var allOpen []OpenPosition
 	var summaries []SymbolSummary
+	var warnings []Warning
 
 	for _, isin := range isinOrder {
 		group := byISIN[isin]
@@ -168,7 +178,7 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]Realiz
 						matchQty, triIdx,
 					)
 					if err != nil {
-						return nil, nil, nil, fmt.Errorf("enrich %s: %w", displaySymbol, err)
+						return nil, nil, nil, nil, fmt.Errorf("enrich %s: %w", displaySymbol, err)
 					}
 					allRealized = append(allRealized, realized)
 					totalMatched += matchQty
@@ -180,8 +190,16 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]Realiz
 					}
 				}
 				if remaining > 0 {
-					log.Printf("WARNING: %s (ISIN %s): %.0f of %.0f sold on %s unmatched (pre-account holding or missing buy data)",
-						displaySymbol, isin, remaining, t.Quantity, t.Date.Format("2006-01-02"))
+					msg := fmt.Sprintf("%.0f of %.0f shares sold on %s unmatched (pre-account holding or missing buy data)",
+						remaining, t.Quantity, t.Date.Format("2006-01-02"))
+					log.Printf("WARNING: %s (ISIN %s): %s", displaySymbol, isin, msg)
+					warnings = append(warnings, Warning{
+						Symbol:    displaySymbol,
+						SellDate:  t.Date.Format("2006-01-02"),
+						Unmatched: remaining,
+						Total:     t.Quantity,
+						Message:   msg,
+					})
 				}
 			}
 		}
@@ -212,7 +230,7 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]Realiz
 		})
 	}
 
-	return allRealized, allOpen, summaries, nil
+	return allRealized, allOpen, summaries, warnings, nil
 }
 
 func buildRealizedTrade(symbol, isin string, buyDate time.Time, buyPrice float64, sellDate time.Time, sellPrice float64, qty float64, triIdx *tri.TRIIndex) (RealizedTrade, error) {

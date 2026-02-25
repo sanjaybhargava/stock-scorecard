@@ -49,7 +49,7 @@ func main() {
 	log.Printf("Loaded TRI index")
 
 	// Step 3: FIFO matching
-	realized, open, summaries, err := matcher.Match(trades, triIdx)
+	realized, open, summaries, warnings, err := matcher.Match(trades, triIdx)
 	if err != nil {
 		log.Fatalf("FIFO match: %v", err)
 	}
@@ -70,7 +70,7 @@ func main() {
 	log.Printf("Win rate: %d%%, Net alpha: ₹%d", summary.WinRate, int(summary.NetAlpha))
 
 	// Step 5: Write JSON
-	if err := output.WriteJSON(*outputPath, realized, open, summary); err != nil {
+	if err := output.WriteJSON(*outputPath, realized, open, warnings, summary); err != nil {
 		log.Fatalf("write JSON: %v", err)
 	}
 	log.Printf("Wrote scorecard to %s", *outputPath)

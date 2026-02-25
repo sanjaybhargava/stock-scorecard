@@ -195,6 +195,22 @@ export default function StockScorecard() {
     return rawData.trades.map(mapTrade);
   }, [rawData]);
 
+  const openPositions = useMemo(() => {
+    if (!rawData) return [];
+    return rawData.open_positions.map(o => ({
+      ticker: o.ticker,
+      buyDate: o.buy_date,
+      quantity: o.quantity,
+      buyPrice: o.buy_price,
+      invested: o.invested,
+    }));
+  }, [rawData]);
+
+  const warnings = useMemo(() => {
+    if (!rawData) return [];
+    return rawData.warnings || [];
+  }, [rawData]);
+
   const summary = useMemo(() => {
     const groups = {};
     TRADES.forEach(t => {
@@ -369,6 +385,68 @@ export default function StockScorecard() {
             </div>
           </div>
         </div>
+
+        {/* Open Positions */}
+        {openPositions.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-3 bg-blue-800">
+              <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Open Positions — Still Held</h2>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200">
+                    {["Ticker", "Buy Date", "Qty", "Buy Price", "Invested"].map(h => (
+                      <th key={h} className="px-4 py-2 text-right first:text-left text-xs font-semibold text-slate-500 uppercase">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {openPositions.map((o, i) => (
+                    <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
+                      <td className="px-4 py-2 text-left font-bold text-slate-900">{o.ticker}</td>
+                      <td className="px-4 py-2 text-right font-mono text-xs text-slate-600">{o.buyDate}</td>
+                      <td className="px-4 py-2 text-right">{o.quantity.toLocaleString("en-IN")}</td>
+                      <td className="px-4 py-2 text-right text-slate-600">{fmt(Math.round(o.buyPrice))}</td>
+                      <td className="px-4 py-2 text-right font-semibold">{fmt(o.invested)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="bg-slate-100 border-t-2 border-slate-300">
+                    <td colSpan={4} className="px-4 py-2 text-left font-bold text-slate-900">Total</td>
+                    <td className="px-4 py-2 text-right font-bold">{fmt(openPositions.reduce((s, o) => s + o.invested, 0))}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Warnings */}
+        {warnings.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-3 bg-amber-700">
+              <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Warnings — Unmatched Sells</h2>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {warnings.map((w, i) => (
+                <div key={i} className="px-4 py-3 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="font-bold text-slate-900 w-28">{w.ticker}</span>
+                    <span className="text-xs text-slate-500">{w.sell_date}</span>
+                  </div>
+                  <div className="text-xs text-amber-800 bg-amber-50 px-3 py-1 rounded">
+                    {w.unmatched_shares} of {w.total_shares} shares unmatched (pre-account holding)
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="px-4 py-2 bg-amber-50 text-xs text-amber-700 border-t border-amber-200">
+              These shares were likely bought before the earliest tradebook (Aug 2019). The sell is recorded but cannot be matched to a buy.
+            </div>
+          </div>
+        )}
 
       </div>
     </div>
