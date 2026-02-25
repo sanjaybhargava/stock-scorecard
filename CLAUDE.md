@@ -266,12 +266,12 @@ go test ./...
 
 ## Build Status
 
-- [ ] Step 1: CSV parsing + dedup + consolidation
-- [ ] Step 2: TRI index loading
-- [ ] Step 3: FIFO matching
-- [ ] Step 4: Scoring + aggregation
-- [ ] Step 5: JSON output
-- [ ] Step 6: CLI wiring + end-to-end test
+- [x] Step 1: CSV parsing + dedup + consolidation
+- [x] Step 2: TRI index loading
+- [x] Step 3: FIFO matching
+- [x] Step 4: Scoring + aggregation
+- [x] Step 5: JSON output
+- [x] Step 6: CLI wiring + end-to-end test
 
 ## Future (not v1)
 

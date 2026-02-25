@@ -32,7 +32,7 @@ const PassFail = ({ pass }) => (
 // ── Level 3: Trade Detail ──
 const TradeDetail = ({ ticker, fy, type, trades, onBack }) => {
   const totalInvested = trades.reduce((s, t) => s + t.invested, 0);
-  const totalGL = trades.reduce((s, t) => s + t.equityGL + t.optionIncome + t.dividend, 0);
+  const totalGL = trades.reduce((s, t) => s + t.equityGL, 0);
   const totalNifty = trades.reduce((s, t) => s + t.niftyReturn, 0);
   const alpha = totalGL - totalNifty;
 
@@ -76,7 +76,7 @@ const TradeDetail = ({ ticker, fy, type, trades, onBack }) => {
         </table>
       </div>
 
-      <div className="mt-6 grid grid-cols-3 gap-4">
+      <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-slate-50 rounded-lg p-4 text-center">
           <div className="text-xs text-slate-500 mb-1">My Return</div>
           <div className={`text-lg font-bold ${totalGL >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(totalGL)}</div>
@@ -100,7 +100,7 @@ const FYDetail = ({ fy, type, trades, onBack, onDrill }) => {
   trades.forEach(t => {
     if (!byTicker[t.ticker]) byTicker[t.ticker] = { invested: 0, totalGL: 0, niftyReturn: 0, count: 0 };
     byTicker[t.ticker].invested += t.invested;
-    byTicker[t.ticker].totalGL += t.equityGL + t.optionIncome + t.dividend;
+    byTicker[t.ticker].totalGL += t.equityGL;
     byTicker[t.ticker].niftyReturn += t.niftyReturn;
     byTicker[t.ticker].count += 1;
   });
@@ -170,8 +170,6 @@ function mapTrade(t) {
     quantity: t.quantity,
     invested: t.invested,
     equityGL: t.equity_gl,
-    optionIncome: 0,
-    dividend: 0,
     niftyReturn: t.nifty_return,
     niftyBuyTri: t.nifty_buy_tri,
     niftySellTri: t.nifty_sell_tri,
@@ -195,12 +193,12 @@ export default function StockScorecard() {
 
   const TRADES = useMemo(() => {
     if (!rawData) return [];
-    return rawData.trades.map(mapTrade);
+    return (rawData.trades || []).map(mapTrade);
   }, [rawData]);
 
   const openPositions = useMemo(() => {
     if (!rawData) return [];
-    return rawData.open_positions.map(o => ({
+    return (rawData.open_positions || []).map(o => ({
       ticker: o.ticker,
       buyDate: o.buy_date,
       quantity: o.quantity,
@@ -221,7 +219,7 @@ export default function StockScorecard() {
       if (!groups[key]) groups[key] = { fy: t.fy, type: t.type, trades: 0, invested: 0, myReturn: 0, niftyReturn: 0 };
       groups[key].trades += 1;
       groups[key].invested += t.invested;
-      groups[key].myReturn += t.equityGL + t.optionIncome + t.dividend;
+      groups[key].myReturn += t.equityGL;
       groups[key].niftyReturn += t.niftyReturn;
     });
     return Object.values(groups)
@@ -319,7 +317,7 @@ export default function StockScorecard() {
     TRADES.forEach(t => {
       const key = `${t.fy}|${t.type}|${t.ticker}`;
       if (!tickerAlphas[key]) tickerAlphas[key] = { gl: 0, nifty: 0 };
-      tickerAlphas[key].gl += t.equityGL + t.optionIncome + t.dividend;
+      tickerAlphas[key].gl += t.equityGL;
       tickerAlphas[key].nifty += t.niftyReturn;
     });
     Object.values(tickerAlphas).forEach(({ gl, nifty }) => {

@@ -310,6 +310,9 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]Realiz
 	// Track latest symbol per ISIN for display
 	latestSymbol := make(map[string]string)
 	for isin, group := range byISIN {
+		if len(group) == 0 {
+			continue
+		}
 		latest := group[0]
 		for _, t := range group[1:] {
 			if t.Date.After(latest.Date) {

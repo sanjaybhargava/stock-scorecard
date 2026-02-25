@@ -243,6 +243,9 @@ func consolidate(trades []Trade) []ConsolidatedTrade {
 	result := make([]ConsolidatedTrade, 0, len(keys))
 	for _, k := range keys {
 		a := groups[k]
+		if a.totalQty == 0 {
+			continue
+		}
 		qty := math.Round(a.totalQty)
 		avgPrice := a.totalVal / a.totalQty
 		result = append(result, ConsolidatedTrade{
