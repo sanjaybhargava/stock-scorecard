@@ -226,6 +226,23 @@ export default function StockScorecard() {
       .sort((a, b) => b.fy.localeCompare(a.fy) || a.type.localeCompare(b.type));
   }, [TRADES]);
 
+  const tickerRankings = useMemo(() => {
+    const byTicker = {};
+    TRADES.forEach(t => {
+      if (!byTicker[t.ticker]) byTicker[t.ticker] = { invested: 0, gl: 0, niftyReturn: 0, trades: 0 };
+      byTicker[t.ticker].invested += t.invested;
+      byTicker[t.ticker].gl += t.equityGL;
+      byTicker[t.ticker].niftyReturn += t.niftyReturn;
+      byTicker[t.ticker].trades += 1;
+    });
+    const all = Object.entries(byTicker).map(([ticker, d]) => ({
+      ticker, ...d, alpha: d.gl - d.niftyReturn,
+    }));
+    const winners = all.filter(t => t.alpha >= 0).sort((a, b) => b.alpha - a.alpha);
+    const losers = all.filter(t => t.alpha < 0).sort((a, b) => a.alpha - b.alpha);
+    return { winners, losers };
+  }, [TRADES]);
+
   const totals = useMemo(() => {
     const all = { trades: 0, invested: 0, myReturn: 0, niftyReturn: 0 };
     const passes = { count: 0, alpha: 0 };
@@ -382,6 +399,65 @@ export default function StockScorecard() {
             </div>
             <div className="flex items-center gap-3">
               <AlphaChip value={totals.all.alpha} size="md" />
+            </div>
+          </div>
+        </div>
+
+        {/* Winners & Losers */}
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 py-3 bg-slate-800">
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Winners & Losers — By Ticker</h2>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-0 md:divide-x divide-slate-200">
+            {/* Winners */}
+            <div>
+              <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-200">
+                <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
+                  ✓ Winners — {tickerRankings.winners.length} stocks
+                </span>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {tickerRankings.winners.map((t, i) => (
+                  <div key={t.ticker} className="px-4 py-2 flex items-center justify-between hover:bg-emerald-50/50">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400 w-5 text-right">{i + 1}.</span>
+                      <span className="font-semibold text-slate-900 text-sm w-28">{t.ticker}</span>
+                      <span className="text-xs text-slate-400">{t.trades} trades</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right hidden sm:block">
+                        <div className="text-xs text-slate-400">G/L {fmt(t.gl)}</div>
+                      </div>
+                      <AlphaChip value={t.alpha} size="sm" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            {/* Losers */}
+            <div>
+              <div className="px-4 py-2 bg-red-50 border-b border-red-200">
+                <span className="text-xs font-bold uppercase tracking-wider text-red-700">
+                  ✗ Losers — {tickerRankings.losers.length} stocks
+                </span>
+              </div>
+              <div className="divide-y divide-slate-100">
+                {tickerRankings.losers.map((t, i) => (
+                  <div key={t.ticker} className="px-4 py-2 flex items-center justify-between hover:bg-red-50/50">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-400 w-5 text-right">{i + 1}.</span>
+                      <span className="font-semibold text-slate-900 text-sm w-28">{t.ticker}</span>
+                      <span className="text-xs text-slate-400">{t.trades} trades</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right hidden sm:block">
+                        <div className="text-xs text-slate-400">G/L {fmt(t.gl)}</div>
+                      </div>
+                      <AlphaChip value={t.alpha} size="sm" />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>
