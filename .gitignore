@@ -1,0 +1,18 @@
+# Go
+stock-scorecard
+scorecard.json
+bin/
+
+# UI
+ui/node_modules/
+ui/dist/
+
+# OS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/
+
+# Claude
+.claude/
