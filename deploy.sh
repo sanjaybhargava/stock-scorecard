@@ -35,9 +35,18 @@ else
     echo "[1/4] Building Go CLI and generating scorecard..."
     cd "$REPO_ROOT"
     go build -o stock-scorecard ./cmd/scorecard
+    # Generate dividends CSV if not already present
+    DIVIDENDS_CSV="$REPO_ROOT/dividends.csv"
+    if [[ ! -f "$DIVIDENDS_CSV" ]]; then
+        echo "       Pulling dividend data..."
+        python3 "$REPO_ROOT/scripts/pull_dividends.py" \
+            --tradebooks ~/Downloads \
+            --output "$DIVIDENDS_CSV"
+    fi
     ./stock-scorecard \
         --tradebooks ~/Downloads \
         --tri ~/Downloads/NIFTY500_TRI_Indexed.csv \
+        --dividends "$DIVIDENDS_CSV" \
         --output "$SCORECARD_JSON"
     echo "       Scorecard written to $SCORECARD_JSON"
 fi

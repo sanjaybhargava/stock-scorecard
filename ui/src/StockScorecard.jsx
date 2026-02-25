@@ -212,6 +212,14 @@ export default function StockScorecard() {
     return rawData.warnings || [];
   }, [rawData]);
 
+  const dividendSummary = useMemo(() => {
+    if (!rawData || !rawData.dividend_summary) return null;
+    const ds = rawData.dividend_summary;
+    const byFy = {};
+    (ds.by_fy || []).forEach(d => { byFy[d.fy] = d.dividend_income; });
+    return { total: ds.total_dividend_income || 0, byFy };
+  }, [rawData]);
+
   const summary = useMemo(() => {
     const groups = {};
     TRADES.forEach(t => {
@@ -419,6 +427,13 @@ export default function StockScorecard() {
                 <div className="text-white font-bold">{fmt(totals.all.invested)}</div>
                 <div className="text-white/40 text-xs">{totals.all.trades} trades</div>
               </div>
+              {dividendSummary && dividendSummary.total > 0 && (
+                <div className="text-center">
+                  <div className="text-white/50">Dividends</div>
+                  <div className="text-emerald-400 font-bold">{fmt(dividendSummary.total)}</div>
+                  <div className="text-white/40 text-xs">while held</div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -452,6 +467,9 @@ export default function StockScorecard() {
                       <div className="text-xs text-slate-400">Me: {fmt(s.myReturn)}</div>
                       <div className="text-xs text-slate-400">N500: {fmt(s.niftyReturn)}</div>
                     </div>
+                    {isFirstOfFY && dividendSummary && dividendSummary.byFy[s.fy] > 0 && (
+                      <span className="text-xs text-emerald-700 font-semibold hidden sm:inline">+{fmt(dividendSummary.byFy[s.fy])} div</span>
+                    )}
                     <AlphaChip value={s.alpha} size="sm" />
                     <PassFail pass={isPass} />
                     <span className="text-slate-300 text-sm">→</span>
@@ -468,6 +486,9 @@ export default function StockScorecard() {
               <span className="text-xs text-slate-500">{totals.all.trades} trades · {fmt(totals.all.invested)}</span>
             </div>
             <div className="flex items-center gap-3">
+              {dividendSummary && dividendSummary.total > 0 && (
+                <span className="text-xs text-emerald-700 font-semibold">+{fmt(dividendSummary.total)} div</span>
+              )}
               <AlphaChip value={totals.all.alpha} size="md" />
             </div>
           </div>
