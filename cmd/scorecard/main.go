@@ -82,6 +82,13 @@ func main() {
 	}
 
 	// Step 3b: F&O option income attribution (optional)
+	//
+	// This runs AFTER FIFO matching (needs realized trade holding periods)
+	// and BEFORE scoring (modifies EquityGL to include option income).
+	//
+	// Two-pass attribution:
+	//   Pass 1: overlap-based (covered calls, protective puts with equity held)
+	//   Pass 2: next-buy fallback for PE contracts (cash-secured puts → stock purchase)
 	var unattributedFnO []fno.UnattributedFnO
 	if *fnoDir != "" {
 		fnoTrades, err := fno.ParseDirectory(*fnoDir)
@@ -94,8 +101,13 @@ func main() {
 		attribution, unattrib := fno.Attribute(contracts, realized)
 		unattributedFnO = unattrib
 
-		// Apply option income to realized trades
+		// Apply option income to realized trades.
+		// EquityGL becomes: capital G/L + dividends + option income.
 		for idx, amount := range attribution {
+			if idx < 0 || idx >= len(realized) {
+				log.Printf("WARNING: F&O attribution index %d out of range (0..%d), skipping", idx, len(realized)-1)
+				continue
+			}
 			rounded := math.Round(amount)
 			realized[idx].OptionIncome += rounded
 			realized[idx].EquityGL += rounded

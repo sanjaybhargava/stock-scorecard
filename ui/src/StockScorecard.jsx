@@ -82,7 +82,7 @@ const TradeDetail = ({ ticker, fy, type, trades, onBack }) => {
                     <td className="px-3 pb-2 text-right text-xs text-slate-400">
                       <span className="text-slate-500">Capital {fmt(Math.round(capitalGL))}</span>
                       {hasDiv && <span className="ml-2 text-emerald-600">+Div {fmt(t.dividendIncome)}</span>}
-                      {hasFnO && <span className={`ml-2 ${t.optionIncome >= 0 ? "text-blue-600" : "text-red-600"}`}>{t.optionIncome >= 0 ? "+" : ""}F&O {fmt(t.optionIncome)}</span>}
+                      {hasFnO && <span className={`ml-2 ${t.optionIncome >= 0 ? "text-emerald-600" : "text-red-600"}`}>{t.optionIncome >= 0 ? "+" : ""}F&O {fmt(t.optionIncome)}</span>}
                     </td>
                     <td colSpan={2} />
                   </tr>
@@ -101,7 +101,7 @@ const TradeDetail = ({ ticker, fy, type, trades, onBack }) => {
             <div className="text-xs text-slate-400 mt-1">
               Capital {fmt(Math.round(totalGL - totalOptionIncome - totalDividendIncome))}
               {totalDividendIncome !== 0 && <span className="text-emerald-600"> +Div {fmt(totalDividendIncome)}</span>}
-              {totalOptionIncome !== 0 && <span className="text-blue-600"> +F&O {fmt(totalOptionIncome)}</span>}
+              {totalOptionIncome !== 0 && <span className="text-emerald-600"> +F&O {fmt(totalOptionIncome)}</span>}
             </div>
           )}
         </div>
@@ -122,10 +122,12 @@ const TradeDetail = ({ ticker, fy, type, trades, onBack }) => {
 const FYDetail = ({ fy, type, trades, onBack, onDrill }) => {
   const byTicker = {};
   trades.forEach(t => {
-    if (!byTicker[t.ticker]) byTicker[t.ticker] = { invested: 0, totalGL: 0, niftyReturn: 0, count: 0 };
+    if (!byTicker[t.ticker]) byTicker[t.ticker] = { invested: 0, totalGL: 0, niftyReturn: 0, count: 0, dividendIncome: 0, optionIncome: 0 };
     byTicker[t.ticker].invested += t.invested;
     byTicker[t.ticker].totalGL += t.equityGL;
     byTicker[t.ticker].niftyReturn += t.niftyReturn;
+    byTicker[t.ticker].dividendIncome += (t.dividendIncome || 0);
+    byTicker[t.ticker].optionIncome += (t.optionIncome || 0);
     byTicker[t.ticker].count += 1;
   });
 
@@ -154,7 +156,11 @@ const FYDetail = ({ fy, type, trades, onBack, onDrill }) => {
               {label === "Passes" ? "✓" : "✗"} {label} — {data.length} stock{data.length > 1 ? "s" : ""}
             </div>
             <div className="space-y-1">
-              {data.map(t => (
+              {data.map(t => {
+                const hasDiv = t.dividendIncome !== 0;
+                const hasFnO = t.optionIncome !== 0;
+                const hasBreakdown = hasDiv || hasFnO;
+                return (
                 <button
                   key={t.ticker}
                   onClick={() => onDrill(t.ticker)}
@@ -168,12 +174,20 @@ const FYDetail = ({ fy, type, trades, onBack, onDrill }) => {
                     <div className="text-right">
                       <div className="text-xs text-slate-400">G/L</div>
                       <div className={`text-sm font-semibold ${t.totalGL >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fmt(t.totalGL)}</div>
+                      {hasBreakdown && (
+                        <div className="text-xs text-slate-400">
+                          {hasDiv && <span className="text-emerald-600">+{fmt(t.dividendIncome)} div</span>}
+                          {hasDiv && hasFnO && <span> </span>}
+                          {hasFnO && <span className="text-emerald-600">{t.optionIncome >= 0 ? "+" : ""}{fmt(t.optionIncome)} F&O</span>}
+                        </div>
+                      )}
                     </div>
                     <AlphaChip value={t.alpha} size="sm" />
                     <span className="text-slate-400 text-sm">→</span>
                   </div>
                 </button>
-              ))}
+                );
+              })}
             </div>
           </div>
         )
@@ -456,11 +470,6 @@ export default function StockScorecard() {
                 <div className="text-red-400 font-bold">{fmt(totals.fails.alpha)}</div>
                 <div className="text-white/40 text-xs">{totals.fails.count} stocks</div>
               </div>
-              <div className="text-center">
-                <div className="text-white/50">Deployed</div>
-                <div className="text-white font-bold">{fmt(totals.all.invested)}</div>
-                <div className="text-white/40 text-xs">{totals.all.trades} trades</div>
-              </div>
               {dividendSummary && dividendSummary.total > 0 && (
                 <div className="text-center">
                   <div className="text-white/50">Dividends</div>
@@ -471,7 +480,7 @@ export default function StockScorecard() {
               {fnoSummary && fnoSummary.total !== 0 && (
                 <div className="text-center">
                   <div className="text-white/50">F&O Income</div>
-                  <div className={`font-bold ${fnoSummary.total >= 0 ? "text-blue-400" : "text-red-400"}`}>{fmt(fnoSummary.total)}</div>
+                  <div className={`font-bold ${fnoSummary.total >= 0 ? "text-emerald-400" : "text-red-400"}`}>{fmt(fnoSummary.total)}</div>
                   <div className="text-white/40 text-xs">option premium</div>
                 </div>
               )}
@@ -512,7 +521,7 @@ export default function StockScorecard() {
                       <span className="text-xs text-emerald-700 font-semibold hidden sm:inline">+{fmt(dividendSummary.byFy[s.fy])} div</span>
                     )}
                     {isFirstOfFY && fnoSummary && fnoSummary.byFy[s.fy] && fnoSummary.byFy[s.fy] !== 0 && (
-                      <span className={`text-xs font-semibold hidden sm:inline ${fnoSummary.byFy[s.fy] >= 0 ? "text-blue-700" : "text-red-700"}`}>{fnoSummary.byFy[s.fy] >= 0 ? "+" : ""}{fmt(fnoSummary.byFy[s.fy])} F&O</span>
+                      <span className={`text-xs font-semibold hidden sm:inline ${fnoSummary.byFy[s.fy] >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fnoSummary.byFy[s.fy] >= 0 ? "+" : ""}{fmt(fnoSummary.byFy[s.fy])} F&O</span>
                     )}
                     <AlphaChip value={s.alpha} size="sm" />
                     <PassFail pass={isPass} />
@@ -534,7 +543,7 @@ export default function StockScorecard() {
                 <span className="text-xs text-emerald-700 font-semibold">+{fmt(dividendSummary.total)} div</span>
               )}
               {fnoSummary && fnoSummary.total !== 0 && (
-                <span className={`text-xs font-semibold ${fnoSummary.total >= 0 ? "text-blue-700" : "text-red-700"}`}>{fnoSummary.total >= 0 ? "+" : ""}{fmt(fnoSummary.total)} F&O</span>
+                <span className={`text-xs font-semibold ${fnoSummary.total >= 0 ? "text-emerald-700" : "text-red-700"}`}>{fnoSummary.total >= 0 ? "+" : ""}{fmt(fnoSummary.total)} F&O</span>
               )}
               <AlphaChip value={totals.all.alpha} size="md" />
             </div>

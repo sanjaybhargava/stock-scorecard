@@ -1,3 +1,18 @@
+// Package fno handles parsing and attribution of F&O (Futures & Options) tradebook
+// data from Zerodha. It computes per-contract P&L and attributes option income to
+// equity realized trades using a two-pass approach:
+//
+//   1. Overlap-based attribution: for contracts whose active period overlaps with an
+//      equity holding period (e.g., covered calls). Income is distributed pro-rata
+//      by shares × overlap_days.
+//
+//   2. Next-buy fallback (PE only): for cash-secured puts with no overlap, income is
+//      attributed to the nearest subsequent equity purchase of the same underlying,
+//      distributed pro-rata by quantity.
+//
+// F&O tradebooks use a 14-column CSV format (same as equity + expiry_date column).
+// Since F&O trades have no ISIN, underlying matching uses symbol names with explicit
+// rename mappings for corporate actions (e.g., MOTHERSUMI→MOTHERSON, HDFC→HDFCBANK).
 package fno
 
 import (
