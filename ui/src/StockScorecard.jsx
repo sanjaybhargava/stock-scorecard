@@ -226,30 +226,58 @@ export default function StockScorecard() {
       .sort((a, b) => b.fy.localeCompare(a.fy) || a.type.localeCompare(b.type));
   }, [TRADES]);
 
-  const monthlyData = useMemo(() => {
-    const byMonth = {};
+  const panicCost = useMemo(() => {
+    // Panic sells: trades sold in March 2020 (COVID crash)
+    const panicSells = TRADES.filter(t => t.sellDate.slice(0, 7) === "2020-03");
+    if (panicSells.length === 0) return null;
+
+    const panicLoss = panicSells.reduce((s, t) => s + t.equityGL, 0);
+    const panicInvested = panicSells.reduce((s, t) => s + t.invested, 0);
+    const panicTickers = new Set(panicSells.map(t => t.ticker));
+
+    // Find stocks that were panic-sold AND re-bought later
+    const postPanicByTicker = {};
     TRADES.forEach(t => {
-      const bm = t.buyDate.slice(0, 7);
-      if (!byMonth[bm]) byMonth[bm] = { invested: 0, trades: 0, gl: 0, nifty: 0 };
-      byMonth[bm].invested += t.invested;
-      byMonth[bm].trades += 1;
-      byMonth[bm].gl += t.equityGL;
-      byMonth[bm].nifty += t.niftyReturn;
+      if (panicTickers.has(t.ticker) && t.buyDate > "2020-03-31") {
+        if (!postPanicByTicker[t.ticker]) postPanicByTicker[t.ticker] = [];
+        postPanicByTicker[t.ticker].push(t);
+      }
     });
-    // Fill gaps so chart is continuous
-    const months = Object.keys(byMonth).sort();
-    if (months.length === 0) return [];
-    const result = [];
-    let [y, m] = months[0].split("-").map(Number);
-    const [ey, em] = months[months.length - 1].split("-").map(Number);
-    while (y < ey || (y === ey && m <= em)) {
-      const key = `${y}-${String(m).padStart(2, "0")}`;
-      const d = byMonth[key] || { invested: 0, trades: 0, gl: 0, nifty: 0 };
-      result.push({ month: key, ...d, alpha: d.gl - d.nifty });
-      m++;
-      if (m > 12) { m = 1; y++; }
+
+    // Round-trip cost: sold low, rebought high
+    const roundTrips = [];
+    let totalSpreadCost = 0;
+    for (const ticker of [...panicTickers].sort()) {
+      const pTrades = panicSells.filter(t => t.ticker === ticker);
+      const rTrades = postPanicByTicker[ticker];
+      if (!rTrades || rTrades.length === 0) continue;
+
+      const pQty = pTrades.reduce((s, t) => s + t.quantity, 0);
+      const pSaleValue = pTrades.reduce((s, t) => s + t.invested + t.equityGL, 0);
+      const pAvgSell = pSaleValue / pQty;
+
+      const rQty = rTrades.reduce((s, t) => s + t.quantity, 0);
+      const rAvgBuy = rTrades.reduce((s, t) => s + t.invested, 0) / rQty;
+
+      const overlapQty = Math.min(pQty, rQty);
+      const spreadCost = (rAvgBuy - pAvgSell) * overlapQty;
+      if (spreadCost > 0) {
+        totalSpreadCost += spreadCost;
+        roundTrips.push({ ticker, qty: overlapQty, soldAt: pAvgSell, reboughtAt: rAvgBuy, cost: spreadCost });
+      }
     }
-    return result;
+    roundTrips.sort((a, b) => b.cost - a.cost);
+
+    return {
+      trades: panicSells.length,
+      invested: panicInvested,
+      loss: panicLoss,
+      spreadCost: totalSpreadCost,
+      totalCost: Math.abs(panicLoss) + totalSpreadCost,
+      roundTrips,
+      tickerCount: panicTickers.size,
+      reboughtCount: roundTrips.length,
+    };
   }, [TRADES]);
 
   const tickerRankings = useMemo(() => {
@@ -434,47 +462,80 @@ export default function StockScorecard() {
           </div>
         </div>
 
-        {/* Monthly Capital Deployed */}
-        {monthlyData.length > 0 && (() => {
-          const maxInvested = Math.max(...monthlyData.map(d => d.invested));
-          return (
-            <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-              <div className="px-4 py-3 bg-slate-800">
-                <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Capital Deployed by Month</h2>
+        {/* Cost of Panic */}
+        {panicCost && (
+          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+            <div className="px-4 py-3 bg-slate-900">
+              <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Cost of Panic — March 2020</h2>
+            </div>
+
+            {/* Verdict */}
+            <div className="bg-red-50 px-6 py-5 text-center border-b border-red-200">
+              <div className="text-sm text-red-800 mb-1">Did you panic?</div>
+              <div className="text-3xl font-bold text-red-700 mb-1">Yes</div>
+              <div className="text-sm text-red-600 mb-3">
+                {panicCost.trades} trades across {panicCost.tickerCount} stocks dumped in March 2020
               </div>
-              <div className="px-4 py-4">
-                <div className="space-y-0.5">
-                  {monthlyData.map(d => {
-                    const pct = maxInvested > 0 ? (d.invested / maxInvested) * 100 : 0;
-                    const alpha = d.gl - d.nifty;
-                    const isLoss = alpha < 0 && d.invested > 0;
-                    const monthLabel = d.month.slice(2).replace("-", "/");
-                    return (
-                      <div key={d.month} className="flex items-center gap-2 group">
-                        <span className="text-[10px] font-mono text-slate-400 w-12 text-right shrink-0">{monthLabel}</span>
-                        <div className="flex-1 h-4 relative">
-                          {pct > 0 && (
-                            <div
-                              className={`h-full rounded-sm ${isLoss ? "bg-red-400" : d.invested > 0 ? "bg-emerald-400" : "bg-slate-100"}`}
-                              style={{ width: `${Math.max(pct, 1)}%` }}
-                            />
-                          )}
-                        </div>
-                        <span className="text-[10px] text-slate-400 w-16 text-right shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                          {d.invested > 0 ? fmt(d.invested) : ""}
-                        </span>
-                      </div>
-                    );
-                  })}
+              <div className="text-sm text-slate-600 mb-1">It cost you</div>
+              <div className="text-4xl font-bold text-red-700">{fmt(Math.round(panicCost.totalCost))}</div>
+            </div>
+
+            {/* Two components */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-slate-200">
+              <div className="px-5 py-4 text-center">
+                <div className="text-xs text-slate-400 uppercase tracking-wider mb-1">Realized Loss</div>
+                <div className="text-xl font-bold text-red-700">{fmt(Math.round(Math.abs(panicCost.loss)))}</div>
+                <div className="text-xs text-slate-500 mt-1">
+                  Sold {fmt(panicCost.invested)} of stocks at crash prices
                 </div>
-                <div className="flex items-center gap-4 mt-3 text-[10px] text-slate-400 justify-end">
-                  <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-emerald-400 inline-block" /> +ve alpha</div>
-                  <div className="flex items-center gap-1"><span className="w-3 h-3 rounded-sm bg-red-400 inline-block" /> -ve alpha</div>
+              </div>
+              <div className="px-5 py-4 text-center">
+                <div className="text-xs text-slate-400 uppercase tracking-wider mb-1">Rebuy Premium</div>
+                <div className="text-xl font-bold text-red-700">{fmt(Math.round(panicCost.spreadCost))}</div>
+                <div className="text-xs text-slate-500 mt-1">
+                  {panicCost.reboughtCount} of {panicCost.tickerCount} stocks bought back at higher prices
                 </div>
               </div>
             </div>
-          );
-        })()}
+
+            {/* Round-trip table */}
+            {panicCost.roundTrips.length > 0 && (
+              <div className="border-t border-slate-200">
+                <div className="px-4 py-2 bg-slate-50 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                  Sold Low, Rebought High
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200">
+                        {["Stock", "Qty", "Panic Sell", "Rebuy Price", "Spread Cost"].map(h => (
+                          <th key={h} className="px-3 py-2 text-right first:text-left text-xs font-medium text-slate-400">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {panicCost.roundTrips.map((rt, i) => (
+                        <tr key={rt.ticker} className={i % 2 === 0 ? "bg-white" : "bg-slate-50"}>
+                          <td className="px-3 py-1.5 text-left font-semibold text-slate-900">{rt.ticker}</td>
+                          <td className="px-3 py-1.5 text-right text-slate-600">{rt.qty.toLocaleString("en-IN")}</td>
+                          <td className="px-3 py-1.5 text-right text-red-600">{fmt(Math.round(rt.soldAt))}</td>
+                          <td className="px-3 py-1.5 text-right text-slate-600">{fmt(Math.round(rt.reboughtAt))}</td>
+                          <td className="px-3 py-1.5 text-right font-semibold text-red-700">{fmt(Math.round(rt.cost))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-slate-300 bg-slate-100">
+                        <td colSpan={4} className="px-3 py-2 text-left font-bold text-slate-900">Total Spread Cost</td>
+                        <td className="px-3 py-2 text-right font-bold text-red-700">{fmt(Math.round(panicCost.spreadCost))}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Winners & Losers */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
