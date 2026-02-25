@@ -143,7 +143,7 @@ const FYDetail = ({ fy, type, trades, onBack, onDrill }) => {
     .sort((a, b) => b.alpha - a.alpha);
 
   const passes = tickers.filter(t => t.alpha >= 0);
-  const fails = tickers.filter(t => t.alpha < 0);
+  const fails = tickers.filter(t => t.alpha < 0).reverse();
 
   return (
     <div>
