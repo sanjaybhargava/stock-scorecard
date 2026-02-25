@@ -316,18 +316,23 @@ export default function StockScorecard() {
         <div className={`rounded-xl p-6 shadow-sm ${isGood ? "bg-emerald-900" : "bg-red-900"}`}>
           <div className="text-center">
             <div className="text-xs font-medium text-white/40 uppercase tracking-widest mb-1">
-              Realized Trades
+              Realized Trades · {totals.all.trades} trades
             </div>
-            <div className="text-sm font-medium text-white/60 uppercase tracking-widest mb-2">
-              Net Alpha vs NIFTY 500
+            <div className={`text-3xl font-bold mt-2 ${totals.all.myReturn >= 0 ? "text-emerald-300" : "text-red-300"}`}>
+              You made {fmt(totals.all.myReturn)}
             </div>
-            <div className={`text-4xl font-bold mb-3 ${isGood ? "text-emerald-300" : "text-red-300"}`}>
-              {isGood ? "▲" : "▼"} {fmt(Math.abs(netAlpha))}
+            <div className="text-white/70 text-sm mt-1 mb-3">
+              {totals.all.myReturn >= totals.all.niftyReturn
+                ? `NIFTY 500 would have made ${fmt(totals.all.niftyReturn)} — you beat the market`
+                : `but NIFTY 500 would have made ${fmt(totals.all.niftyReturn)} on the same capital`}
             </div>
-            <div className="text-white/80 text-sm mb-4">
-              {isGood
-                ? "You're adding value. Keep picking."
-                : "NIFTY 500 would've done better. Consider going passive."}
+            <div className="border-t border-white/10 pt-3 mb-1">
+              <div className="text-xs font-medium text-white/40 uppercase tracking-widest mb-1">
+                Net Alpha vs NIFTY 500
+              </div>
+              <div className={`text-4xl font-bold mb-3 ${isGood ? "text-emerald-300" : "text-red-300"}`}>
+                {isGood ? "▲" : "▼"} {fmt(Math.abs(netAlpha))}
+              </div>
             </div>
             <div className="flex justify-center gap-6 text-sm">
               <div className="text-center">
