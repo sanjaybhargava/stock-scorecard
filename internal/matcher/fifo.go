@@ -76,13 +76,14 @@ type isinSplit struct {
 	ratio   float64
 }
 
-// Known corporate actions (stock splits / bonus issues) that changed the ISIN.
+// Known corporate actions (stock splits / bonus issues / mergers) that changed the ISIN.
 var knownSplits = map[string]isinSplit{
-	"INE00WC01019": {newISIN: "INE00WC01027", ratio: 5},  // AFFLE bonus 4:1 (5x total)
-	"INE935N01012": {newISIN: "INE935N01020", ratio: 5},  // DIXON stock split 1:5
-	"INE254N01018": {newISIN: "INE254N01026", ratio: 5},  // HNDFDS stock split 1:5
-	"INE239A01016": {newISIN: "INE239A01024", ratio: 10}, // NESTLEIND stock split 1:10
-	"INE884A01019": {newISIN: "INE884A01027", ratio: 5},  // VAIBHAVGBL stock split 1:5
+	"INE00WC01019": {newISIN: "INE00WC01027", ratio: 5},    // AFFLE bonus 4:1 (5x total)
+	"INE935N01012": {newISIN: "INE935N01020", ratio: 5},    // DIXON stock split 1:5
+	"INE254N01018": {newISIN: "INE254N01026", ratio: 5},    // HNDFDS stock split 1:5
+	"INE239A01016": {newISIN: "INE239A01024", ratio: 10},   // NESTLEIND stock split 1:10
+	"INE884A01019": {newISIN: "INE884A01027", ratio: 5},    // VAIBHAVGBL stock split 1:5
+	"INE001A01036": {newISIN: "INE040A01034", ratio: 1.68}, // HDFC→HDFCBANK merger 42:25
 }
 
 // applySplits adjusts pre-split trades: reassigns old ISIN to new ISIN,
@@ -97,7 +98,7 @@ func applySplits(trades []tradebook.ConsolidatedTrade) []tradebook.ConsolidatedT
 				t.Quantity, t.Quantity*split.ratio,
 				t.AvgPrice, t.AvgPrice/split.ratio)
 			result[i].ISIN = split.newISIN
-			result[i].Quantity = math.Round(t.Quantity * split.ratio)
+			result[i].Quantity = math.Floor(t.Quantity * split.ratio)
 			result[i].AvgPrice = t.AvgPrice / split.ratio
 			result[i].Value = result[i].Quantity * result[i].AvgPrice
 		}
