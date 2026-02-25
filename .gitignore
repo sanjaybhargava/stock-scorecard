@@ -16,3 +16,4 @@ ui/dist/
 
 # Claude
 .claude/
+node_modules/

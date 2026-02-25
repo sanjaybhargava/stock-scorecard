@@ -229,45 +229,67 @@ export default function StockScorecard() {
       .sort((a, b) => b.fy.localeCompare(a.fy) || a.type.localeCompare(b.type));
   }, [TRADES]);
 
-  const panicCost = useMemo(() => {
-    // Panic sells: trades sold in March 2020 (COVID crash)
-    const panicSells = TRADES.filter(t => t.sellDate.slice(0, 7) === "2020-03");
-    if (panicSells.length === 0) return null;
+  const panicAnalysis = useMemo(() => {
+    // Check if any trades existed before or during the pandemic (before Apr 2020)
+    const prePandemic = TRADES.filter(t => t.buyDate < "2020-04-01");
+    if (prePandemic.length === 0) return { status: "post-pandemic" };
+
+    // Panic sells: trades sold in Feb-Mar 2020 (COVID crash)
+    const panicSells = TRADES.filter(t => t.sellDate >= "2020-02-01" && t.sellDate < "2020-04-01");
+    if (panicSells.length === 0) return { status: "no-panic" };
 
     const panicProceeds = panicSells.reduce((s, t) => s + t.saleValue, 0);
     const panicLoss = panicSells.reduce((s, t) => s + t.equityGL, 0);
 
-    // Find exit TRI — use trades sold in Oct 2024 and Jan 2025 (final exits)
-    const octExits = TRADES.filter(t => t.sellDate.slice(0, 7) === "2024-10");
-    const janExits = TRADES.filter(t => t.sellDate.slice(0, 7) === "2025-01");
-    // Weighted average exit TRI
-    const octTri = octExits.length > 0 ? octExits[0].niftySellTri : 0;
-    const janTri = janExits.length > 0 ? janExits[0].niftySellTri : 0;
-    const octValue = octExits.reduce((s, t) => s + t.saleValue, 0);
-    const janValue = janExits.reduce((s, t) => s + t.saleValue, 0);
-    const exitValue = octValue + janValue;
+    // Find the last sell date across all trades to use as the exit reference
+    const lastSellDate = TRADES.reduce((max, t) => t.sellDate > max ? t.sellDate : max, "");
 
-    // Grow each panic sell's proceeds by Nifty from sell date to blended exit
-    const exitTri = exitValue > 0 ? (octTri * octValue + janTri * janValue) / exitValue : octTri;
+    // Get exit TRI from the latest trades (last 3 months of selling)
+    const allSellMonths = [...new Set(TRADES.map(t => t.sellDate.slice(0, 7)))].sort();
+    const recentMonths = new Set(allSellMonths.slice(-3));
+    const recentExits = TRADES.filter(t => recentMonths.has(t.sellDate.slice(0, 7)));
+
+    if (recentExits.length === 0) return { status: "no-panic" };
+
+    // Value-weighted exit TRI
+    const totalExitValue = recentExits.reduce((s, t) => s + t.saleValue, 0);
+    const exitTri = recentExits.reduce((s, t) => s + t.niftySellTri * t.saleValue, 0) / totalExitValue;
+
+    // Grow each panic sell's proceeds by Nifty from sell date to exit
     let grownValue = 0;
     panicSells.forEach(t => {
       grownValue += t.saleValue * (exitTri / t.niftySellTri);
     });
 
-    // User-provided adjustments
-    const expenses = 20000000;   // ₹2Cr withdrawn for expenses & other investments
-    const taxSaved = 5000000;    // ₹0.5Cr tax credit on booked losses
+    // Estimate expenses: panic proceeds minus what was redeployed afterward
+    const postPanicBuys = TRADES
+      .filter(t => t.buyDate >= "2020-04-01")
+      .sort((a, b) => a.buyDate.localeCompare(b.buyDate));
 
-    const netCost = grownValue - exitValue - expenses - taxSaved;
+    let redeployed = 0;
+    for (const t of postPanicBuys) {
+      redeployed += t.invested;
+      if (redeployed >= panicProceeds) break;
+    }
+    const amountRedeployed = Math.min(redeployed, panicProceeds);
+    const expenses = Math.max(0, panicProceeds - amountRedeployed);
 
+    // Estimate tax saved: loss x 15% (STCG rate, conservative)
+    const taxSaved = Math.abs(panicLoss) * 0.15;
+
+    const netCost = grownValue - totalExitValue - expenses - taxSaved;
+
+    const lastMonth = lastSellDate.slice(0, 7);
     return {
+      status: "panicked",
       panicProceeds,
       panicLoss,
       grownValue,
-      exitValue,
-      expenses,
-      taxSaved,
+      exitValue: totalExitValue,
+      expenses: Math.round(expenses),
+      taxSaved: Math.round(taxSaved),
       netCost,
+      exitLabel: recentMonths.size === 1 ? lastMonth.replace("-", " ") : `${[...recentMonths][0].replace("-", " ")} – ${lastMonth.replace("-", " ")}`,
     };
   }, [TRADES]);
 
@@ -454,51 +476,67 @@ export default function StockScorecard() {
         </div>
 
         {/* Cost of Panic */}
-        {panicCost && (
-          <div className="bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="px-4 py-3 bg-slate-900">
-              <h2 className="text-sm font-semibold text-white uppercase tracking-wider">Cost of Panic — March 2020</h2>
-            </div>
+        <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+          <div className="px-4 py-3 bg-slate-900">
+            <h2 className="text-sm font-semibold text-white uppercase tracking-wider">COVID Pandemic — March 2020</h2>
+          </div>
 
-            {/* Verdict */}
+          {panicAnalysis.status === "post-pandemic" && (
+            <div className="bg-slate-50 px-6 py-5 text-center">
+              <div className="text-sm text-slate-500 mb-2">Did you panic?</div>
+              <div className="text-2xl font-bold text-slate-400 mb-2">N/A</div>
+              <div className="text-sm text-slate-500">You started investing after the pandemic. This section does not apply.</div>
+            </div>
+          )}
+
+          {panicAnalysis.status === "no-panic" && (
+            <div className="bg-emerald-50 px-6 py-5 text-center">
+              <div className="text-sm text-emerald-800 mb-2">Did you panic?</div>
+              <div className="text-4xl font-bold text-emerald-700 mb-2">No</div>
+              <div className="text-sm text-emerald-600">No evidence of panic selling during the pandemic. You held your nerve.</div>
+            </div>
+          )}
+
+          {panicAnalysis.status === "panicked" && (<>
             <div className="bg-red-50 px-6 py-5 text-center border-b border-red-200">
               <div className="text-sm text-red-800 mb-2">Did you panic?</div>
               <div className="text-4xl font-bold text-red-700 mb-3">Yes</div>
               <div className="text-sm text-slate-600 mb-1">It cost you</div>
-              <div className="text-5xl font-bold text-red-700">{fmt(Math.round(panicCost.netCost))}</div>
+              <div className="text-5xl font-bold text-red-700">{fmt(Math.round(panicAnalysis.netCost))}</div>
             </div>
 
-            {/* The math */}
             <div className="px-6 py-5">
               <div className="space-y-3 text-sm">
                 <div className="flex justify-between items-center py-2 border-b border-slate-100">
-                  <span className="text-slate-600">You panic-sold in March 2020</span>
-                  <span className="font-semibold text-slate-900">{fmt(Math.round(panicCost.panicProceeds))}</span>
+                  <span className="text-slate-600">You panic-sold in Feb–Mar 2020</span>
+                  <span className="font-semibold text-slate-900">{fmt(Math.round(panicAnalysis.panicProceeds))}</span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-slate-100">
-                  <span className="text-slate-600">If held in NIFTY 500 till you exited (Oct '24 / Jan '25)</span>
-                  <span className="font-bold text-emerald-700 text-lg">{fmt(Math.round(panicCost.grownValue))}</span>
+                  <span className="text-slate-600">If held in NIFTY 500 till you exited ({panicAnalysis.exitLabel})</span>
+                  <span className="font-bold text-emerald-700 text-lg">{fmt(Math.round(panicAnalysis.grownValue))}</span>
                 </div>
                 <div className="flex justify-between items-center py-2 border-b border-slate-100 text-slate-500">
                   <span>Less: what you actually got back at exit</span>
-                  <span>– {fmt(Math.round(panicCost.exitValue))}</span>
+                  <span>– {fmt(Math.round(panicAnalysis.exitValue))}</span>
                 </div>
+                {panicAnalysis.expenses > 0 && (
+                  <div className="flex justify-between items-center py-2 border-b border-slate-100 text-slate-500">
+                    <span>Less: proceeds not redeployed (expenses & other)</span>
+                    <span>– {fmt(panicAnalysis.expenses)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between items-center py-2 border-b border-slate-100 text-slate-500">
-                  <span>Less: expenses & other investments</span>
-                  <span>– {fmt(panicCost.expenses)}</span>
-                </div>
-                <div className="flex justify-between items-center py-2 border-b border-slate-100 text-slate-500">
-                  <span>Less: tax saved on booked losses</span>
-                  <span>– {fmt(panicCost.taxSaved)}</span>
+                  <span>Less: estimated tax saved on booked losses</span>
+                  <span>– {fmt(panicAnalysis.taxSaved)}</span>
                 </div>
                 <div className="flex justify-between items-center py-3 bg-red-50 -mx-6 px-6 rounded">
                   <span className="font-bold text-red-900">Net cost of panic</span>
-                  <span className="font-bold text-red-700 text-xl">{fmt(Math.round(panicCost.netCost))}</span>
+                  <span className="font-bold text-red-700 text-xl">{fmt(Math.round(panicAnalysis.netCost))}</span>
                 </div>
               </div>
             </div>
-          </div>
-        )}
+          </>)}
+        </div>
 
         {/* Winners & Losers */}
         <div className="bg-white rounded-xl shadow-sm overflow-hidden">
