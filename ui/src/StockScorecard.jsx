@@ -184,7 +184,7 @@ export default function StockScorecard() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch("/scorecard.json")
+    fetch(import.meta.env.BASE_URL + "scorecard.json")
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(setRawData)
       .catch(e => setError(e.message));
