@@ -21,12 +21,12 @@ type RealizedTrade struct {
 	Quantity    float64
 	BuyPrice    float64
 	SellPrice   float64
-	Invested    float64 // Quantity × BuyPrice
-	SaleValue   float64 // Quantity × SellPrice
+	Invested    float64 // Quantity x BuyPrice
+	SaleValue   float64 // Quantity x SellPrice
 	EquityGL    float64 // SaleValue - Invested
 	NiftyBuy    float64 // TRI on buy date
 	NiftySell   float64 // TRI on sell date
-	NiftyReturn float64 // Invested × (NiftySell/NiftyBuy - 1)
+	NiftyReturn float64 // Invested x (NiftySell/NiftyBuy - 1)
 	FY          string  // FY of sell date, e.g. "FY 2024-25"
 	Type        string  // "Long" if HoldDays > 365, else "Short"
 }
@@ -52,17 +52,56 @@ type SymbolSummary struct {
 
 // buyLot is an internal struct for the FIFO queue.
 type buyLot struct {
-	date     time.Time
-	qty      float64
-	price    float64
-	symbol   string
-	isin     string
-	orderID  string
+	date    time.Time
+	qty     float64
+	price   float64
+	symbol  string
+	isin    string
+	orderID string
+}
+
+// isinSplit maps old ISIN to new ISIN with the split/bonus ratio.
+// Ratio means: 1 old share became N new shares.
+type isinSplit struct {
+	newISIN string
+	ratio   float64
+}
+
+// Known corporate actions (stock splits / bonus issues) that changed the ISIN.
+var knownSplits = map[string]isinSplit{
+	"INE00WC01019": {newISIN: "INE00WC01027", ratio: 5},  // AFFLE bonus 4:1 (5x total)
+	"INE935N01012": {newISIN: "INE935N01020", ratio: 5},  // DIXON stock split 1:5
+	"INE254N01018": {newISIN: "INE254N01026", ratio: 5},  // HNDFDS stock split 1:5
+	"INE239A01016": {newISIN: "INE239A01024", ratio: 10}, // NESTLEIND stock split 1:10
+	"INE884A01019": {newISIN: "INE884A01027", ratio: 5},  // VAIBHAVGBL stock split 1:5
+}
+
+// applySplits adjusts pre-split trades: reassigns old ISIN to new ISIN,
+// multiplies quantity by ratio, divides price by ratio.
+func applySplits(trades []tradebook.ConsolidatedTrade) []tradebook.ConsolidatedTrade {
+	result := make([]tradebook.ConsolidatedTrade, len(trades))
+	for i, t := range trades {
+		result[i] = t
+		if split, ok := knownSplits[t.ISIN]; ok {
+			log.Printf("Adjusting %s: ISIN %s -> %s (%.0f:1 split), qty %.0f -> %.0f, price %.2f -> %.2f",
+				t.Symbol, t.ISIN, split.newISIN, split.ratio,
+				t.Quantity, t.Quantity*split.ratio,
+				t.AvgPrice, t.AvgPrice/split.ratio)
+			result[i].ISIN = split.newISIN
+			result[i].Quantity = math.Round(t.Quantity * split.ratio)
+			result[i].AvgPrice = t.AvgPrice / split.ratio
+			result[i].Value = result[i].Quantity * result[i].AvgPrice
+		}
+	}
+	return result
 }
 
 // Match performs FIFO matching on consolidated trades, enriches with TRI data,
 // and returns realized trades, open positions, and per-symbol summaries.
 func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]RealizedTrade, []OpenPosition, []SymbolSummary, error) {
+	// Apply stock split adjustments before grouping
+	trades = applySplits(trades)
+
 	// Group trades by ISIN
 	byISIN := make(map[string][]tradebook.ConsolidatedTrade)
 	var isinOrder []string
@@ -75,18 +114,10 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]Realiz
 
 	// Track latest symbol per ISIN for display
 	latestSymbol := make(map[string]string)
-	for _, t := range trades {
-		existing, ok := latestSymbol[t.ISIN]
-		if !ok || t.Date.After(trades[0].Date) {
-			_ = existing
-			latestSymbol[t.ISIN] = t.Symbol
-		}
-	}
-	// More accurate: iterate all and keep the one with the latest date
 	for isin, group := range byISIN {
 		latest := group[0]
 		for _, t := range group[1:] {
-			if t.Date.After(latest.Date) || (t.Date.Equal(latest.Date) && t.Symbol != latest.Symbol) {
+			if t.Date.After(latest.Date) {
 				latest = t
 			}
 		}
@@ -101,7 +132,7 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]Realiz
 		group := byISIN[isin]
 		displaySymbol := latestSymbol[isin]
 
-		// Sort by (date ASC, tradeType ASC — "buy" < "sell")
+		// Sort by (date ASC, tradeType ASC -- "buy" < "sell")
 		sort.Slice(group, func(i, j int) bool {
 			if !group[i].Date.Equal(group[j].Date) {
 				return group[i].Date.Before(group[j].Date)
@@ -149,16 +180,13 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex) ([]Realiz
 					}
 				}
 				if remaining > 0 {
-					// Stock splits/bonus issues can change the ISIN, so pre-split buys
-					// are under the old ISIN while post-split sells use the new one.
-					// Without corporate action data we can't match — warn and skip.
-					log.Printf("WARNING: %s (ISIN %s): sell of %.0f on %s has %.0f unmatched (likely stock split/bonus)",
-						displaySymbol, isin, t.Quantity, t.Date.Format("2006-01-02"), remaining)
+					log.Printf("WARNING: %s (ISIN %s): %.0f of %.0f sold on %s unmatched (pre-account holding or missing buy data)",
+						displaySymbol, isin, remaining, t.Quantity, t.Date.Format("2006-01-02"))
 				}
 			}
 		}
 
-		// Remaining queue → open positions
+		// Remaining queue -> open positions
 		for _, lot := range queue {
 			allOpen = append(allOpen, OpenPosition{
 				Symbol:   displaySymbol,
@@ -229,7 +257,7 @@ func buildRealizedTrade(symbol, isin string, buyDate time.Time, buyPrice float64
 }
 
 // fiscalYear returns "FY YYYY-YY" based on the date.
-// Apr 1 to Mar 31 → e.g. sell on 2025-01-15 → "FY 2024-25"
+// Apr 1 to Mar 31: sell on 2025-01-15 -> "FY 2024-25"
 func fiscalYear(d time.Time) string {
 	y := d.Year()
 	if d.Month() < 4 { // Jan-Mar belongs to previous FY
