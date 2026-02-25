@@ -49,13 +49,14 @@ func ParseDirectory(dir string, excludes []string) ([]ConsolidatedTrade, error) 
 		excludeSet[strings.ToUpper(strings.TrimSpace(s))] = true
 	}
 
-	// Match Zerodha tradebook naming: BT{client_id}_{start}_{end}.csv
-	files, err := filepath.Glob(filepath.Join(dir, "BT*.csv"))
+	// Glob all CSVs and rely on header validation to identify Zerodha tradebooks.
+	// This supports any file naming convention (BT*, client_id_*, etc.).
+	files, err := filepath.Glob(filepath.Join(dir, "*.csv"))
 	if err != nil {
 		return nil, fmt.Errorf("glob csv files: %w", err)
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no BT*.csv tradebook files found in %s", dir)
+		return nil, fmt.Errorf("no .csv files found in %s", dir)
 	}
 
 	seenTradeIDs := make(map[string]bool)

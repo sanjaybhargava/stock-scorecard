@@ -62,12 +62,14 @@ const fnoHeader = "symbol,isin,trade_date,exchange,segment,series,trade_type,auc
 // ParseDirectory reads all BT*_FO_*.csv files from dir, deduplicates by
 // trade_id, consolidates fills, and returns sorted FnOTrades.
 func ParseDirectory(dir string) ([]FnOTrade, error) {
-	files, err := filepath.Glob(filepath.Join(dir, "BT*_FO_*.csv"))
+	// Glob all CSVs and rely on header validation to identify F&O tradebooks.
+	// This supports any file naming convention (BT*_FO_*, client_id_FO_*, etc.).
+	files, err := filepath.Glob(filepath.Join(dir, "*.csv"))
 	if err != nil {
 		return nil, fmt.Errorf("glob F&O files: %w", err)
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no BT*_FO_*.csv files found in %s", dir)
+		return nil, fmt.Errorf("no .csv files found in %s", dir)
 	}
 
 	seenTradeIDs := make(map[string]bool)
@@ -83,7 +85,8 @@ func ParseDirectory(dir string) ([]FnOTrade, error) {
 	}
 
 	if len(allRaw) == 0 {
-		return nil, fmt.Errorf("no F&O trades parsed from %s", dir)
+		// No F&O trades found is normal — directory may contain only equity tradebooks.
+		return nil, nil
 	}
 
 	log.Printf("Parsed %d raw F&O trades from %d files", len(allRaw), len(files))
