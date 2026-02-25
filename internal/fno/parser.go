@@ -59,8 +59,9 @@ var symbolRenames = map[string]string{
 
 const fnoHeader = "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time,expiry_date"
 
-// ParseDirectory reads all BT*_FO_*.csv files from dir, deduplicates by
-// trade_id, consolidates fills, and returns sorted FnOTrades.
+// ParseDirectory reads all *.csv files from dir, identifies F&O tradebooks by
+// header validation, deduplicates by trade_id, consolidates fills, and returns
+// sorted FnOTrades. Returns nil, nil if no F&O tradebooks are found.
 func ParseDirectory(dir string) ([]FnOTrade, error) {
 	// Glob all CSVs and rely on header validation to identify F&O tradebooks.
 	// This supports any file naming convention (BT*_FO_*, client_id_FO_*, etc.).
