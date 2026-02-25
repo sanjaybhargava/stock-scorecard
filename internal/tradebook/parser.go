@@ -74,6 +74,21 @@ func ParseDirectory(dir string, excludes []string) ([]ConsolidatedTrade, error) 
 		return nil, fmt.Errorf("no trades parsed from %s", dir)
 	}
 
+	// Fill in blank ISINs from other trades of the same symbol
+	isinBySymbol := make(map[string]string)
+	for _, t := range allTrades {
+		if t.ISIN != "" {
+			isinBySymbol[t.Symbol] = t.ISIN
+		}
+	}
+	for i := range allTrades {
+		if allTrades[i].ISIN == "" {
+			if isin, ok := isinBySymbol[allTrades[i].Symbol]; ok {
+				allTrades[i].ISIN = isin
+			}
+		}
+	}
+
 	consolidated := consolidate(allTrades)
 
 	// Sort by (ISIN, date, trade_type)
@@ -139,10 +154,11 @@ func parseFile(path string, excludes map[string]bool, seenTradeIDs map[string]bo
 		}
 
 		tradeID := strings.TrimSpace(record[10])
-		if seenTradeIDs[tradeID] {
+		dedupKey := symbol + "|" + tradeID
+		if seenTradeIDs[dedupKey] {
 			continue // duplicate
 		}
-		seenTradeIDs[tradeID] = true
+		seenTradeIDs[dedupKey] = true
 
 		tradeDate, err := time.Parse("2006-01-02", strings.TrimSpace(record[2]))
 		if err != nil {
