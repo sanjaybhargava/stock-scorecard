@@ -6,31 +6,73 @@
 
 This is a **standalone module**, separate from `broker-trade-sync`. Different concerns, no shared code.
 
+## Architecture: Import / Score
+
+The CLI has two subcommands plus a legacy all-in-one mode:
+
+```
+~/Downloads/ (raw CSVs)  →  import wizard  →  ./data/BT2632/ (clean, per-client)  →  score  →  scorecard.json
+                              interactive         source of truth                       batch
+                              one-time             permanent                            repeatable
+```
+
+**Clean data directory structure:**
+```
+./data/
+  tri.csv                       # NIFTY 500 TRI — shared across all clients
+  BT2632/
+    trades_BT2632.csv           # deduplicated equity trades
+    fno_BT2632.csv              # deduplicated F&O trades
+    dividends_BT2632.csv        # confirmed dividends
+    reconciliation_BT2632.json  # splits, demergers, manual trades, user decisions
+  BT9999/                       # another client — same structure
+    trades_BT9999.csv
+    ...
+```
+
 ## Folder Structure
 
 ```
 stock-scorecard/
 ├── cmd/
 │   └── scorecard/
-│       └── main.go              # CLI entry point
+│       ├── main.go              # CLI entry point + subcommand dispatch + legacy mode
+│       ├── import.go            # "import" subcommand — parse raw CSVs, run wizard
+│       └── score.go             # "score" subcommand — read clean data, generate scorecard
 ├── internal/
 │   ├── tradebook/
-│   │   └── parser.go            # Zerodha EQ CSV parsing + dedup + consolidation
+│   │   └── parser.go            # Zerodha EQ CSV parsing + dedup + consolidation + client ID
 │   ├── tri/
 │   │   └── loader.go            # TRI CSV loading + date lookup with fallback
 │   ├── matcher/
-│   │   └── fifo.go              # FIFO buy-sell matching + corporate actions
+│   │   └── fifo.go              # FIFO buy-sell matching (reads reconciliation data)
 │   ├── dividend/
-│   │   └── loader.go            # Dividend CSV loading + per-share lookup
+│   │   ├── loader.go            # Dividend CSV loading + per-share lookup
+│   │   └── fetcher.go           # Yahoo Finance API dividend fetching + Python fallback
 │   ├── fno/
 │   │   ├── parser.go            # F&O tradebook CSV parsing + dedup + consolidation
 │   │   └── attributor.go        # Contract P&L computation + pro-rata attribution
 │   ├── scorer/
 │   │   └── scorer.go            # Alpha computation, FY grouping, aggregation
-│   └── output/
-│       └── json.go              # JSON serialization
+│   ├── output/
+│   │   └── json.go              # JSON serialization
+│   ├── reconciliation/
+│   │   ├── types.go             # ReconciliationData struct (splits, demergers, manual trades, F&O renames)
+│   │   ├── loader.go            # Load/Save JSON + Default() for BT2632 backward compat
+│   │   └── loader_test.go       # Roundtrip test
+│   ├── clientid/
+│   │   ├── extract.go           # Extract client ID from BT{id}_*.csv filenames
+│   │   └── extract_test.go
+│   ├── cleandata/
+│   │   ├── writer.go            # Write consolidated trades/F&O to CSV
+│   │   ├── reader.go            # Read them back
+│   │   └── roundtrip_test.go
+│   └── wizard/
+│       ├── wizard.go            # Interactive reconciliation engine (open positions, unmatched sells)
+│       ├── dividends.go         # Dividend fetching + FY-level confirmation
+│       └── wizard_test.go
 ├── scripts/
-│   └── pull_dividends.py        # Fetches dividend data from Google Finance
+│   └── pull_dividends.py        # Fetches dividend data from Yahoo Finance (Python fallback)
 ├── ui/                          # React scorecard UI (Vite + Tailwind)
 │   ├── src/
 │   │   └── StockScorecard.jsx   # Single-file React component (3-level drill-down)
@@ -44,6 +86,41 @@ stock-scorecard/
 
 ## CLI Interface
 
+### New: Two-Command Workflow
+
+```bash
+# Import: parse raw CSVs → interactive wizard → clean data files
+stock-scorecard import \
+  --source ~/Downloads \
+  --tri ~/Downloads/NIFTY500_TRI_Indexed.csv \
+  --output ./data/
+
+# Score: read clean data → generate scorecard JSON (batch, repeatable)
+stock-scorecard score \
+  --data ./data/ \
+  --client BT2632 \
+  --output ./scorecard.json
+
+# Second user — TRI already in ./data/, no --tri needed
+stock-scorecard import --source ~/wife-downloads --output ./data/
+stock-scorecard score --data ./data/ --client BT9999 --output ./wife-scorecard.json
+```
+
+**Import flags:**
+- `--source` (required): Directory containing raw Zerodha tradebook CSVs
+- `--tri` (required on first import): Path to NIFTY 500 TRI CSV — copied to `./data/tri.csv`
+- `--output` (optional): Output directory for clean data. Default: `./data`
+- `--exclude` (optional): Comma-separated symbols to skip. Default: `LIQUIDBEES`
+- `--skip-dividends` (optional): Skip dividend fetching
+
+**Score flags:**
+- `--data` (optional): Data directory. Default: `./data`
+- `--client` (required): Client ID (e.g. `BT2632` or `2632`)
+- `--output` (optional): Path for output JSON. Default: `./scorecard.json`
+- `--verbose` (optional): Print per-symbol FIFO summary
+
+### Legacy Mode (Backward Compatible)
+
 ```bash
 go run ./cmd/scorecard \
   --tradebooks ~/Downloads \
@@ -53,66 +130,81 @@ go run ./cmd/scorecard \
   --output ./scorecard.json
 ```
 
-**Flags:**
-- `--tradebooks` (required): Directory containing Zerodha equity tradebook CSVs (`BT*.csv`)
+**Legacy flags:**
+- `--tradebooks` (required): Directory containing Zerodha equity tradebook CSVs
 - `--tri` (required): Path to NIFTY 500 TRI Indexed CSV file
 - `--output` (required): Path for output JSON file
-- `--dividends` (optional): Path to dividends CSV (from `scripts/pull_dividends.py`)
-- `--fno` (optional): Directory containing F&O tradebook CSVs (`BT*_FO_*.csv`)
-- `--exclude` (optional): Comma-separated symbols to skip. Default: `LIQUIDBEES,GOLDBEES`
+- `--dividends` (optional): Path to dividends CSV
+- `--fno` (optional): Directory containing F&O tradebook CSVs
+- `--reconciliation` (optional): Path to reconciliation JSON (auto-loads if matching file exists)
+- `--wizard` (optional): Run interactive reconciliation wizard after FIFO matching
+- `--exclude` (optional): Comma-separated symbols to skip. Default: `LIQUIDBEES`
 - `--broker` (optional): Broker format. Default: `zerodha`
 - `--verbose` (optional): Print per-symbol FIFO summary to stderr
 
 ## Processing Pipeline
 
+### Import Pipeline
 ```
-Parse EQ CSVs → Load TRI → Load Dividends → FIFO Match → Parse F&O → Attribute F&O → Score → JSON
+Parse EQ/FnO CSVs → Copy TRI → FIFO Match → Interactive Wizard → Fetch Dividends → Write Clean Data
+```
+
+### Score Pipeline
+```
+Read Clean Data → Load TRI → Load Dividends → FIFO Match → F&O Attribution → Score → JSON
 ```
 
 ### Step 1: Parse & Dedup Equity (internal/tradebook/parser.go)
 
-1. Read all `BT*.csv` files from `--tradebooks` directory; skip files that don't match Zerodha 13-column header
+1. Read all `*.csv` files from source directory; skip files that don't match Zerodha 13-column header
 2. Dedup by `trade_id` globally (defensive against duplicate/overlapping files)
 3. Skip ETFs (`INF*` ISIN prefix) and excluded symbols
 4. Consolidate fills: group by `(ISIN, trade_date, trade_type, order_id)`, compute VWAP
 5. Round quantities to integers (equity = whole shares)
+6. Extract client ID from `BT{id}_*.csv` filenames
 
 ### Step 2: Load TRI Index (internal/tri/loader.go)
 
 - Load NIFTY 500 TRI into `map[string]float64` keyed by `YYYY-MM-DD`
 - Weekend/holiday fallback: binary search for most recent prior trading day
 
-### Step 2b: Load Dividends (internal/dividend/loader.go)
+### Step 2b: Load Dividends (internal/dividend/loader.go + fetcher.go)
 
-- Parse CSV with columns: `symbol, ex_date, amount` (split-adjusted per-share)
+- **Loader:** Parse CSV with columns: `symbol, ex_date, amount` (split-adjusted per-share)
+- **Fetcher:** Go-native Yahoo Finance API + Python `pull_dividends.py` fallback
 - Lookup: sum all dividends where `buy_date <= ex_date < sell_date`
 
 ### Step 3: FIFO Matching (internal/matcher/fifo.go)
 
-1. Apply corporate actions: stock splits (`knownSplits`), demergers (`knownDemergers`), manual trades (`knownManualTrades`)
+1. Apply corporate actions from reconciliation data: stock splits, demergers, manual trades
 2. Group by ISIN, sort by (date, trade_type)
 3. FIFO queue: on sell, consume oldest buy lots, splitting partial lots
 4. Each matched pair → `RealizedTrade` enriched with TRI + dividends
 5. Remaining buy lots → `OpenPosition`
 6. Unmatched sells → `Warning` (pre-account holdings)
 
+### Step 3a: Reconciliation Wizard (internal/wizard/)
+
+Interactive prompts for:
+- **Open positions:** `[H]eld / [S]old / [K]ip` — if sold, collect date + price → manual sell
+- **Unmatched sells:** `[P]rovide buy / [S]kip` — collect buy date + price → manual buy
+- **Dividends:** Fetch from Yahoo Finance, show FY totals, `[Y/n]` confirmation
+
 ### Step 3b: F&O Attribution (internal/fno/)
 
 **Parser** (`parser.go`):
-1. Read `BT*_FO_*.csv` files from `--fno` directory (14-column header with `expiry_date`)
+1. Read `*.csv` files from directory (14-column header with `expiry_date`)
 2. Extract underlying + option type from symbol via regex: `^([A-Z][A-Z&-]*[A-Z])\d{2}[A-Z]{3}\d+(?:\.\d+)?(CE|PE)$`
-3. Apply symbol renames: `MOTHERSUMI→MOTHERSON`, `HDFC→HDFCBANK` (F&O has no ISIN)
+3. Apply F&O symbol renames from reconciliation data
 4. Dedup by `trade_id`, consolidate fills with VWAP
 
 **Attributor** (`attributor.go`):
 1. Group F&O trades by `(underlying, raw_symbol)` → one `ContractPnL` per option contract lifecycle
 2. Contract P&L: `net_pnl = Σ(sell_value) - Σ(buy_value)`
 3. **Two-pass attribution** to equity realized trades:
-   - **Pass 1 (overlap):** For CE and PE contracts, find equity trades where holding period overlaps the contract's active period (`first_trade_date → expiry_date`). Weight = `shares × overlap_days`. Distributes income pro-rata. Used for covered calls and protective puts.
-   - **Pass 2 (next-buy, PE only):** For put contracts with no overlap, find the nearest equity buy_date ≥ put's expiry and distribute pro-rata by quantity. This handles cash-secured puts that led to stock purchases.
-4. Unattributed contracts (no equity position at all) → `UnattributedFnO` list
-
-**Why two passes:** The user's strategy is covered calls (CE) + cash-secured puts (PE). Covered calls overlap with equity holding periods, but cash-secured puts expire *before* the resulting stock purchase, so overlap is always zero. The next-buy fallback captures this pattern.
+   - **Pass 1 (overlap):** For CE and PE contracts, find equity trades where holding period overlaps the contract's active period. Weight = `shares × overlap_days`.
+   - **Pass 2 (next-buy, PE only):** For put contracts with no overlap, find the nearest equity buy_date ≥ put's expiry and distribute pro-rata by quantity.
+4. Unattributed contracts → `UnattributedFnO` list
 
 ### Step 4: Score & Aggregate (internal/scorer/scorer.go)
 
@@ -124,6 +216,30 @@ Parse EQ CSVs → Load TRI → Load Dividends → FIFO Match → Parse F&O → A
 ### Step 5: JSON Output (internal/output/json.go)
 
 Serializes to JSON with: `trades`, `open_positions`, `warnings`, `summary`, `dividend_summary`, `fno_summary`, `unattributed_fno`.
+
+## Reconciliation Data (internal/reconciliation/)
+
+Per-client JSON file storing corporate action data that was previously hardcoded:
+
+```json
+{
+  "client_id": "BT2632",
+  "splits": [
+    {"old_isin": "INE935N01012", "new_isin": "INE935N01020", "ratio": 5, "note": "DIXON 1:5"}
+  ],
+  "demergers": [
+    {"parent_isin": "INE002A01018", "child_isin": "INE758E01017", "child_symbol": "JIOFIN", "record_date": "2023-07-20", "parent_cost_pct": 0.9532}
+  ],
+  "manual_trades": [
+    {"symbol": "MPHASIS", "isin": "INE356A01018", "date": "2022-01-27", "trade_type": "buy", "quantity": 700, "price": 3000}
+  ],
+  "fno_renames": {"MOTHERSUMI": "MOTHERSON", "HDFC": "HDFCBANK"}
+}
+```
+
+- `Default()` returns BT2632 hardcoded data for backward compatibility
+- Auto-loaded from `reconciliation_{clientID}.json` if found next to output
+- Updated interactively by the wizard
 
 ## Input Files
 
@@ -149,7 +265,7 @@ symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price
 Date,TRI_Indexed
 ```
 
-### Dividends CSV (from pull_dividends.py)
+### Dividends CSV
 
 ```
 symbol,ex_date,amount
@@ -171,31 +287,12 @@ symbol,ex_date,amount
     "nifty_buy_tri": 280.50, "nifty_sell_tri": 410.20,
     "nifty_return": 377500, "alpha": 325785
   }],
-  "open_positions": [{
-    "ticker": "SYMBOL", "buy_date": "2024-06-15",
-    "quantity": 500, "buy_price": 1200.00, "invested": 600000,
-    "note": "No matching sell — still held"
-  }],
-  "warnings": [{
-    "ticker": "SYMBOL", "sell_date": "2020-03-23",
-    "unmatched_shares": 500, "total_shares": 500,
-    "message": "..."
-  }],
-  "summary": {
-    "total_trades": 657, "total_invested": 125000000,
-    "total_my_return": 2400000, "total_nifty_return": 1800000,
-    "net_alpha": 600000, "win_rate": 46,
-    "by_fy": [{ "fy": "FY 2024-25", "type": "Long", "num_trades": 12, "invested": 4500000, "my_return": 800000, "nifty_return": 600000, "alpha": 200000 }]
-  },
-  "dividend_summary": {
-    "total_dividend_income": 150000,
-    "by_fy": [{ "fy": "FY 2024-25", "dividend_income": 50000 }]
-  },
-  "fno_summary": {
-    "total_option_income": 7300000, "unattributed": 880000,
-    "by_fy": [{ "fy": "FY 2024-25", "option_income": 2000000 }]
-  },
-  "unattributed_fno": [{ "underlying": "NIFTY", "net_pnl": -50000, "note": "No equity position to attribute to" }]
+  "open_positions": [{...}],
+  "warnings": [{...}],
+  "summary": {...},
+  "dividend_summary": {...},
+  "fno_summary": {...},
+  "unattributed_fno": [{...}]
 }
 ```
 
@@ -206,12 +303,13 @@ symbol,ex_date,amount
 - **Missing TRI dates:** Weekend/holiday → use most recent prior trading day
 - **Open positions:** Buy lots without matching sells → `open_positions` array
 - **Symbol name changes:** ISIN is stable across renames (MOTHERSUMI→MOTHERSON). Use ISIN for matching
-- **Stock splits / demergers:** Handled via `knownSplits` and `knownDemergers` in matcher
+- **Stock splits / demergers:** Handled via reconciliation JSON (previously hardcoded)
 - **F&O decimal strikes:** Regex handles symbols like `NTPC23JUN182.5CE`, `POWERGRID23SEP198.75CE`
-- **F&O symbol renames:** MOTHERSUMI→MOTHERSON, HDFC→HDFCBANK (explicit map, no ISIN in F&O)
+- **F&O symbol renames:** Stored in reconciliation JSON (e.g. MOTHERSUMI→MOTHERSON, HDFC→HDFCBANK)
 - **Cash-secured puts:** No overlap with equity → attributed via "next buy" fallback
 - **Index options (NIFTY, BANKNIFTY):** No underlying equity → unattributed, reported separately
-- **Backward compatibility:** Running without `--fno` or `--dividends` produces identical output to v1
+- **Multi-client:** Each client gets own data directory, TRI shared across all
+- **Backward compatibility:** Legacy flags still work identically; `Default()` provides BT2632 data
 
 ## Deploy
 
@@ -234,7 +332,11 @@ The deploy script:
 ## Commands
 
 ```bash
-# Full run with all data sources
+# New workflow: import + score
+stock-scorecard import --source ~/Downloads --tri ~/Downloads/NIFTY500_TRI_Indexed.csv --output ./data/
+stock-scorecard score --data ./data/ --client BT2632 --output ./scorecard.json
+
+# Legacy: all-in-one (still works)
 go run ./cmd/scorecard \
   --tradebooks ~/Downloads \
   --tri ~/Downloads/NIFTY500_TRI_Indexed.csv \
@@ -258,7 +360,7 @@ go test ./...
 - Idiomatic Go error handling: check and wrap with context
 - `log` package for pipeline progress (not `fmt.Println`)
 - Package names: lowercase, single word
-- No external dependencies beyond stdlib
+- No external dependencies beyond stdlib (except `net/http` for dividend fetching)
 - All monetary values rounded to int (rupees) for display; floating point internally
 
 ## Future Enhancements

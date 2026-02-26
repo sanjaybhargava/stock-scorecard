@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"stock-scorecard/internal/clientid"
 )
 
 // Trade represents a single raw trade row from a Zerodha tradebook CSV.
@@ -41,9 +43,10 @@ type ConsolidatedTrade struct {
 const zerodhaHeader = "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time"
 
 // ParseDirectory reads all *.csv files from dir, deduplicates by trade_id,
-// consolidates fills, and returns sorted ConsolidatedTrades.
+// consolidates fills, and returns sorted ConsolidatedTrades plus the detected
+// client ID (e.g. "2632" from BT2632_*.csv filenames).
 // excludes is a set of symbols to skip (e.g. LIQUIDBEES, GOLDBEES).
-func ParseDirectory(dir string, excludes []string) ([]ConsolidatedTrade, error) {
+func ParseDirectory(dir string, excludes []string) ([]ConsolidatedTrade, string, error) {
 	excludeSet := make(map[string]bool, len(excludes))
 	for _, s := range excludes {
 		excludeSet[strings.ToUpper(strings.TrimSpace(s))] = true
@@ -53,11 +56,18 @@ func ParseDirectory(dir string, excludes []string) ([]ConsolidatedTrade, error) 
 	// This supports any file naming convention (BT*, client_id_*, etc.).
 	files, err := filepath.Glob(filepath.Join(dir, "*.csv"))
 	if err != nil {
-		return nil, fmt.Errorf("glob csv files: %w", err)
+		return nil, "", fmt.Errorf("glob csv files: %w", err)
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("no .csv files found in %s", dir)
+		return nil, "", fmt.Errorf("no .csv files found in %s", dir)
 	}
+
+	// Extract client ID from filenames
+	basenames := make([]string, len(files))
+	for i, f := range files {
+		basenames[i] = filepath.Base(f)
+	}
+	detectedClientID, _ := clientid.Extract(basenames) // best-effort; empty if not detected
 
 	seenTradeIDs := make(map[string]bool)
 	var allTrades []Trade
@@ -72,7 +82,7 @@ func ParseDirectory(dir string, excludes []string) ([]ConsolidatedTrade, error) 
 	}
 
 	if len(allTrades) == 0 {
-		return nil, fmt.Errorf("no trades parsed from %s", dir)
+		return nil, "", fmt.Errorf("no trades parsed from %s", dir)
 	}
 
 	// Fill in blank ISINs from other trades of the same symbol
@@ -103,7 +113,7 @@ func ParseDirectory(dir string, excludes []string) ([]ConsolidatedTrade, error) 
 		return consolidated[i].TradeType < consolidated[j].TradeType
 	})
 
-	return consolidated, nil
+	return consolidated, detectedClientID, nil
 }
 
 // parseFile reads a single CSV file, validates the Zerodha header, deduplicates

@@ -8,30 +8,31 @@ import (
 	"time"
 
 	"stock-scorecard/internal/dividend"
+	"stock-scorecard/internal/reconciliation"
 	"stock-scorecard/internal/tradebook"
 	"stock-scorecard/internal/tri"
 )
 
 // RealizedTrade represents a matched buy-sell pair.
 type RealizedTrade struct {
-	Symbol      string
-	ISIN        string
-	BuyDate     time.Time
-	SellDate    time.Time
-	HoldDays    int
-	Quantity    float64
-	BuyPrice    float64
-	SellPrice   float64
-	Invested    float64 // Quantity x BuyPrice
-	SaleValue   float64 // Quantity x SellPrice
+	Symbol         string
+	ISIN           string
+	BuyDate        time.Time
+	SellDate       time.Time
+	HoldDays       int
+	Quantity       float64
+	BuyPrice       float64
+	SellPrice      float64
+	Invested       float64 // Quantity x BuyPrice
+	SaleValue      float64 // Quantity x SellPrice
 	EquityGL       float64 // SaleValue - Invested + DividendIncome + OptionIncome
 	DividendIncome float64 // dividend income during holding period (also included in EquityGL)
 	OptionIncome   float64 // F&O option income attributed to this trade (also included in EquityGL)
 	NiftyBuy       float64 // TRI on buy date
-	NiftySell   float64 // TRI on sell date
-	NiftyReturn float64 // Invested x (NiftySell/NiftyBuy - 1)
-	FY          string  // FY of sell date, e.g. "FY 2024-25"
-	Type        string  // "Long" if HoldDays > 365, else "Short"
+	NiftySell      float64 // TRI on sell date
+	NiftyReturn    float64 // Invested x (NiftySell/NiftyBuy - 1)
+	FY             string  // FY of sell date, e.g. "FY 2024-25"
+	Type           string  // "Long" if HoldDays > 365, else "Short"
 }
 
 // OpenPosition represents unmatched buy lots still held.
@@ -72,79 +73,48 @@ type buyLot struct {
 	orderID string
 }
 
-// isinSplit maps old ISIN to new ISIN with the split/bonus ratio.
-// Ratio means: 1 old share became N new shares.
-type isinSplit struct {
-	newISIN string
-	ratio   float64
-}
-
-// Known corporate actions (stock splits / bonus issues / mergers) that changed the ISIN.
-var knownSplits = map[string]isinSplit{
-	"INE00WC01019": {newISIN: "INE00WC01027", ratio: 5},    // AFFLE bonus 4:1 (5x total)
-	"INE935N01012": {newISIN: "INE935N01020", ratio: 5},    // DIXON stock split 1:5
-	"INE254N01018": {newISIN: "INE254N01026", ratio: 5},    // HNDFDS stock split 1:5
-	"INE239A01016": {newISIN: "INE239A01024", ratio: 10},   // NESTLEIND stock split 1:10
-	"INE884A01019": {newISIN: "INE884A01027", ratio: 5},    // VAIBHAVGBL stock split 1:5
-	"INE001A01036": {newISIN: "INE040A01034", ratio: 1.68}, // HDFC→HDFCBANK merger 42:25
-}
-
 // applySplits adjusts pre-split trades: reassigns old ISIN to new ISIN,
 // multiplies quantity by ratio, divides price by ratio.
-func applySplits(trades []tradebook.ConsolidatedTrade) []tradebook.ConsolidatedTrade {
+func applySplits(trades []tradebook.ConsolidatedTrade, splits map[string]reconciliation.Split) []tradebook.ConsolidatedTrade {
+	if len(splits) == 0 {
+		return trades
+	}
 	result := make([]tradebook.ConsolidatedTrade, len(trades))
 	for i, t := range trades {
 		result[i] = t
-		if split, ok := knownSplits[t.ISIN]; ok {
-			log.Printf("Adjusting %s: ISIN %s -> %s (%.0f:1 split), qty %.0f -> %.0f, price %.2f -> %.2f",
-				t.Symbol, t.ISIN, split.newISIN, split.ratio,
-				t.Quantity, t.Quantity*split.ratio,
-				t.AvgPrice, t.AvgPrice/split.ratio)
-			result[i].ISIN = split.newISIN
-			result[i].Quantity = math.Floor(t.Quantity * split.ratio)
-			result[i].AvgPrice = t.AvgPrice / split.ratio
+		if split, ok := splits[t.ISIN]; ok {
+			log.Printf("Adjusting %s: ISIN %s -> %s (%.2f:1 split), qty %.0f -> %.0f, price %.2f -> %.2f",
+				t.Symbol, t.ISIN, split.NewISIN, split.Ratio,
+				t.Quantity, t.Quantity*split.Ratio,
+				t.AvgPrice, t.AvgPrice/split.Ratio)
+			result[i].ISIN = split.NewISIN
+			result[i].Quantity = math.Floor(t.Quantity * split.Ratio)
+			result[i].AvgPrice = t.AvgPrice / split.Ratio
 			result[i].Value = result[i].Quantity * result[i].AvgPrice
 		}
 	}
 	return result
 }
 
-// demerger describes a corporate demerger where a parent company spins off a child.
-// Parent shares stay under the parent ISIN but cost is reduced.
-// New child shares are created with cost = (1 - parentCostPct) of original parent cost.
-type demerger struct {
-	parentISIN    string
-	childISIN     string
-	childSymbol   string
-	recordDate    time.Time
-	parentCostPct float64 // e.g. 0.9532 means parent retains 95.32% of cost
-}
-
-// Known demergers.
-var knownDemergers = []demerger{
-	{
-		parentISIN:    "INE002A01018", // RELIANCE
-		childISIN:     "INE758E01017", // JIOFIN
-		childSymbol:   "JIOFIN",
-		recordDate:    time.Date(2023, 7, 20, 0, 0, 0, 0, time.UTC),
-		parentCostPct: 0.9532,
-	},
-}
-
 // applyDemergers performs a partial FIFO on each parent ISIN to find lots held
 // at the record date. It reduces parent cost and creates synthetic child buy lots.
-func applyDemergers(trades []tradebook.ConsolidatedTrade) []tradebook.ConsolidatedTrade {
-	for _, d := range knownDemergers {
-		trades = applyOneDemerger(trades, d)
+func applyDemergers(trades []tradebook.ConsolidatedTrade, demergers []reconciliation.Demerger) []tradebook.ConsolidatedTrade {
+	for _, d := range demergers {
+		recordDate, err := d.ParseRecordDate()
+		if err != nil {
+			log.Printf("WARNING: skipping demerger %s: invalid record_date %q: %v", d.ChildSymbol, d.RecordDate, err)
+			continue
+		}
+		trades = applyOneDemerger(trades, d.ParentISIN, d.ChildISIN, d.ChildSymbol, recordDate, d.ParentCostPct)
 	}
 	return trades
 }
 
-func applyOneDemerger(trades []tradebook.ConsolidatedTrade, d demerger) []tradebook.ConsolidatedTrade {
+func applyOneDemerger(trades []tradebook.ConsolidatedTrade, parentISIN, childISIN, childSymbol string, recordDate time.Time, parentCostPct float64) []tradebook.ConsolidatedTrade {
 	// Collect parent trades sorted by (date, tradeType)
 	var parentTrades []tradebook.ConsolidatedTrade
 	for _, t := range trades {
-		if t.ISIN == d.parentISIN {
+		if t.ISIN == parentISIN {
 			parentTrades = append(parentTrades, t)
 		}
 	}
@@ -168,7 +138,7 @@ func applyOneDemerger(trades []tradebook.ConsolidatedTrade, d demerger) []tradeb
 	var queue []lot
 
 	for _, t := range parentTrades {
-		if t.Date.After(d.recordDate) {
+		if t.Date.After(recordDate) {
 			break
 		}
 		if t.TradeType == "buy" {
@@ -196,7 +166,7 @@ func applyOneDemerger(trades []tradebook.ConsolidatedTrade, d demerger) []tradeb
 		totalHeld += l.qty
 	}
 	log.Printf("Demerger %s: %.0f parent shares held at record date %s, creating %.0f %s lots",
-		d.childSymbol, totalHeld, d.recordDate.Format("2006-01-02"), totalHeld, d.childSymbol)
+		childSymbol, totalHeld, recordDate.Format("2006-01-02"), totalHeld, childSymbol)
 
 	// Track which parent buy dates/prices need cost adjustment
 	type lotKey struct {
@@ -214,15 +184,15 @@ func applyOneDemerger(trades []tradebook.ConsolidatedTrade, d demerger) []tradeb
 	// Build result with adjusted parent trades and new child trades.
 	var result []tradebook.ConsolidatedTrade
 	for _, t := range trades {
-		if t.ISIN == d.parentISIN && t.TradeType == "buy" {
+		if t.ISIN == parentISIN && t.TradeType == "buy" {
 			k := lotKey{date: t.Date, price: t.AvgPrice}
 			if heldLots[k] {
 				// Adjust parent cost
 				adjusted := t
-				adjusted.AvgPrice = t.AvgPrice * d.parentCostPct
+				adjusted.AvgPrice = t.AvgPrice * parentCostPct
 				adjusted.Value = adjusted.Quantity * adjusted.AvgPrice
 				log.Printf("  %s buy %s: cost %.2f -> %.2f (%.2f%% retained)",
-					t.Symbol, t.Date.Format("2006-01-02"), t.AvgPrice, adjusted.AvgPrice, d.parentCostPct*100)
+					t.Symbol, t.Date.Format("2006-01-02"), t.AvgPrice, adjusted.AvgPrice, parentCostPct*100)
 				result = append(result, adjusted)
 				continue
 			}
@@ -232,10 +202,10 @@ func applyOneDemerger(trades []tradebook.ConsolidatedTrade, d demerger) []tradeb
 
 	// Create synthetic child buy lots from held parent lots
 	for _, l := range queue {
-		childPrice := l.price * (1 - d.parentCostPct)
+		childPrice := l.price * (1 - parentCostPct)
 		child := tradebook.ConsolidatedTrade{
-			Symbol:    d.childSymbol,
-			ISIN:      d.childISIN,
+			Symbol:    childSymbol,
+			ISIN:      childISIN,
 			Date:      l.date,
 			TradeType: "buy",
 			Quantity:  l.qty,
@@ -244,48 +214,30 @@ func applyOneDemerger(trades []tradebook.ConsolidatedTrade, d demerger) []tradeb
 			OrderID:   "demerger",
 		}
 		log.Printf("  Created %s buy %s: %.0f shares @ %.2f (%.2f%% of parent %.2f)",
-			d.childSymbol, l.date.Format("2006-01-02"), l.qty, childPrice, (1-d.parentCostPct)*100, l.price)
+			childSymbol, l.date.Format("2006-01-02"), l.qty, childPrice, (1-parentCostPct)*100, l.price)
 		result = append(result, child)
 	}
 
 	return result
 }
 
-// manualTrade represents a trade missing from the tradebooks (e.g. downloaded
-// before the trade appeared, or pre-account holding with known details).
-type manualTrade struct {
-	symbol    string
-	isin      string
-	date      time.Time
-	tradeType string // "buy" or "sell"
-	quantity  float64
-	price     float64
-}
-
-// Known missing trades not present in tradebook CSVs.
-var knownManualTrades = []manualTrade{
-	{symbol: "MPHASIS", isin: "INE356A01018", date: time.Date(2022, 1, 27, 0, 0, 0, 0, time.UTC), tradeType: "buy", quantity: 700, price: 3000.00},
-	{symbol: "SYNGENE", isin: "INE398R01022", date: time.Date(2022, 6, 30, 0, 0, 0, 0, time.UTC), tradeType: "sell", quantity: 3400, price: 550.00},
-	{symbol: "DIVISLAB", isin: "INE361B01024", date: time.Date(2021, 9, 30, 0, 0, 0, 0, time.UTC), tradeType: "buy", quantity: 600, price: 4800.00},
-	{symbol: "POWERGRID", isin: "INE752E01010", date: time.Date(2023, 9, 12, 0, 0, 0, 0, time.UTC), tradeType: "buy", quantity: 900, price: 0},
-	{symbol: "SUNPHARMA", isin: "INE044A01036", date: time.Date(2023, 6, 28, 0, 0, 0, 0, time.UTC), tradeType: "sell", quantity: 700, price: 1020.00},
-	{symbol: "BRITANNIA", isin: "INE216A01030", date: time.Date(2021, 1, 28, 0, 0, 0, 0, time.UTC), tradeType: "sell", quantity: 1000, price: 3600.00},
-	{symbol: "ULTRACEMCO", isin: "INE481G01011", date: time.Date(2023, 11, 30, 0, 0, 0, 0, time.UTC), tradeType: "sell", quantity: 100, price: 9000.00},
-	{symbol: "NAUKRI", isin: "INE663F01024", date: time.Date(2021, 4, 29, 0, 0, 0, 0, time.UTC), tradeType: "sell", quantity: 750, price: 5000.00},
-}
-
 // injectManualTrades adds known missing trades to the trade list.
-func injectManualTrades(trades []tradebook.ConsolidatedTrade) []tradebook.ConsolidatedTrade {
-	for _, m := range knownManualTrades {
-		log.Printf("Injecting manual %s: %s %s %.0f shares @ %.2f", m.tradeType, m.symbol, m.date.Format("2006-01-02"), m.quantity, m.price)
+func injectManualTrades(trades []tradebook.ConsolidatedTrade, manuals []reconciliation.ManualTrade) []tradebook.ConsolidatedTrade {
+	for _, m := range manuals {
+		d, err := m.ParseDate()
+		if err != nil {
+			log.Printf("WARNING: skipping manual trade %s: invalid date %q: %v", m.Symbol, m.Date, err)
+			continue
+		}
+		log.Printf("Injecting manual %s: %s %s %.0f shares @ %.2f", m.TradeType, m.Symbol, d.Format("2006-01-02"), m.Quantity, m.Price)
 		trades = append(trades, tradebook.ConsolidatedTrade{
-			Symbol:    m.symbol,
-			ISIN:      m.isin,
-			Date:      m.date,
-			TradeType: m.tradeType,
-			Quantity:  m.quantity,
-			AvgPrice:  m.price,
-			Value:     m.quantity * m.price,
+			Symbol:    m.Symbol,
+			ISIN:      m.ISIN,
+			Date:      d,
+			TradeType: m.TradeType,
+			Quantity:  m.Quantity,
+			AvgPrice:  m.Price,
+			Value:     m.Quantity * m.Price,
 			OrderID:   "manual",
 		})
 	}
@@ -294,11 +246,14 @@ func injectManualTrades(trades []tradebook.ConsolidatedTrade) []tradebook.Consol
 
 // Match performs FIFO matching on consolidated trades, enriches with TRI data,
 // and returns realized trades, open positions, and per-symbol summaries.
-func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex, divIdx *dividend.DividendIndex) ([]RealizedTrade, []OpenPosition, []SymbolSummary, []Warning, error) {
+// If recon is nil, no corporate action adjustments or manual trades are applied.
+func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex, divIdx *dividend.DividendIndex, recon *reconciliation.ReconciliationData) ([]RealizedTrade, []OpenPosition, []SymbolSummary, []Warning, error) {
 	// Apply corporate action adjustments and manual entries before grouping
-	trades = applySplits(trades)
-	trades = applyDemergers(trades)
-	trades = injectManualTrades(trades)
+	if recon != nil {
+		trades = applySplits(trades, recon.SplitsMap())
+		trades = applyDemergers(trades, recon.Demergers)
+		trades = injectManualTrades(trades, recon.ManualTrades)
+	}
 
 	// Group trades by ISIN
 	byISIN := make(map[string][]tradebook.ConsolidatedTrade)
@@ -384,7 +339,6 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex, divIdx *d
 				if remaining > 0 {
 					msg := fmt.Sprintf("%.0f of %.0f shares sold on %s unmatched (pre-account holding or missing buy data)",
 						remaining, t.Quantity, t.Date.Format("2006-01-02"))
-					log.Printf("WARNING: %s (ISIN %s): %s", displaySymbol, isin, msg)
 					warnings = append(warnings, Warning{
 						Symbol:    displaySymbol,
 						SellDate:  t.Date.Format("2006-01-02"),

@@ -2,13 +2,13 @@
 // data from Zerodha. It computes per-contract P&L and attributes option income to
 // equity realized trades using a two-pass approach:
 //
-//   1. Overlap-based attribution: for contracts whose active period overlaps with an
-//      equity holding period (e.g., covered calls). Income is distributed pro-rata
-//      by shares × overlap_days.
+//  1. Overlap-based attribution: for contracts whose active period overlaps with an
+//     equity holding period (e.g., covered calls). Income is distributed pro-rata
+//     by shares × overlap_days.
 //
-//   2. Next-buy fallback (PE only): for cash-secured puts with no overlap, income is
-//      attributed to the nearest subsequent equity purchase of the same underlying,
-//      distributed pro-rata by quantity.
+//  2. Next-buy fallback (PE only): for cash-secured puts with no overlap, income is
+//     attributed to the nearest subsequent equity purchase of the same underlying,
+//     distributed pro-rata by quantity.
 //
 // F&O tradebooks use a 14-column CSV format (same as equity + expiry_date column).
 // Since F&O trades have no ISIN, underlying matching uses symbol names with explicit
@@ -37,7 +37,7 @@ type FnOTrade struct {
 	OptionType string // "CE" or "PE"
 	ExpiryDate time.Time
 	TradeDate  time.Time
-	TradeType  string  // "buy" or "sell"
+	TradeType  string // "buy" or "sell"
 	Quantity   float64
 	Price      float64
 	Value      float64 // Quantity x Price
@@ -50,19 +50,14 @@ type FnOTrade struct {
 // Handles decimal strikes like NTPC23JUN182.5CE, POWERGRID23SEP198.75CE
 var symbolRe = regexp.MustCompile(`^([A-Z][A-Z&-]*[A-Z])\d{2}[A-Z]{3}\d+(?:\.\d+)?(CE|PE)$`)
 
-// symbolRenames maps old F&O underlying names to current equity display names.
-// F&O has no ISIN, so we need explicit symbol mapping for renames and mergers.
-var symbolRenames = map[string]string{
-	"MOTHERSUMI": "MOTHERSON",
-	"HDFC":       "HDFCBANK",
-}
-
 const fnoHeader = "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time,expiry_date"
 
 // ParseDirectory reads all *.csv files from dir, identifies F&O tradebooks by
 // header validation, deduplicates by trade_id, consolidates fills, and returns
 // sorted FnOTrades. Returns nil, nil if no F&O tradebooks are found.
-func ParseDirectory(dir string) ([]FnOTrade, error) {
+// fnoRenames maps old F&O underlying names to current equity display names
+// (e.g. "MOTHERSUMI" → "MOTHERSON"). Pass nil for no renames.
+func ParseDirectory(dir string, fnoRenames map[string]string) ([]FnOTrade, error) {
 	// Glob all CSVs and rely on header validation to identify F&O tradebooks.
 	// This supports any file naming convention (BT*_FO_*, client_id_FO_*, etc.).
 	files, err := filepath.Glob(filepath.Join(dir, "*.csv"))
@@ -77,10 +72,9 @@ func ParseDirectory(dir string) ([]FnOTrade, error) {
 	var allRaw []rawFnOTrade
 
 	for _, f := range files {
-		trades, err := parseFnOFile(f, seenTradeIDs)
+		trades, err := parseFnOFile(f, seenTradeIDs, fnoRenames)
 		if err != nil {
-			log.Printf("Skipping F&O file %s: %v", f, err)
-			continue
+			continue // non-F&O files are expected in ~/Downloads
 		}
 		allRaw = append(allRaw, trades...)
 	}
@@ -119,7 +113,7 @@ type rawFnOTrade struct {
 	orderID    string
 }
 
-func parseFnOFile(path string, seenTradeIDs map[string]bool) ([]rawFnOTrade, error) {
+func parseFnOFile(path string, seenTradeIDs map[string]bool, fnoRenames map[string]string) ([]rawFnOTrade, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open %s: %w", path, err)
@@ -164,7 +158,7 @@ func parseFnOFile(path string, seenTradeIDs map[string]bool) ([]rawFnOTrade, err
 		}
 
 		// Apply symbol renames
-		if renamed, ok := symbolRenames[underlying]; ok {
+		if renamed, ok := fnoRenames[underlying]; ok {
 			underlying = renamed
 		}
 

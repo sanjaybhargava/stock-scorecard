@@ -15,21 +15,21 @@ import (
 
 // Scorecard is the top-level JSON output structure.
 type Scorecard struct {
-	GeneratedAt      string              `json:"generated_at"`
-	Trades           []TradeJSON         `json:"trades"`
-	OpenPositions    []OpenJSON          `json:"open_positions"`
-	Warnings         []WarningJSON       `json:"warnings"`
-	Summary          SummaryJSON         `json:"summary"`
-	DividendSummary  *DividendSummJSON   `json:"dividend_summary,omitempty"`
-	FnOSummary       *FnOSummJSON        `json:"fno_summary,omitempty"`
-	UnattributedFnO  []UnattributedJSON  `json:"unattributed_fno,omitempty"`
+	GeneratedAt     string             `json:"generated_at"`
+	Trades          []TradeJSON        `json:"trades"`
+	OpenPositions   []OpenJSON         `json:"open_positions"`
+	Warnings        []WarningJSON      `json:"warnings"`
+	Summary         SummaryJSON        `json:"summary"`
+	DividendSummary *DividendSummJSON  `json:"dividend_summary,omitempty"`
+	FnOSummary      *FnOSummJSON       `json:"fno_summary,omitempty"`
+	UnattributedFnO []UnattributedJSON `json:"unattributed_fno,omitempty"`
 }
 
 // FnOSummJSON is the JSON representation of the F&O option income summary.
 type FnOSummJSON struct {
-	TotalOptionIncome int           `json:"total_option_income"`
-	Unattributed      int           `json:"unattributed"`
-	ByFY              []FnOFYJSON   `json:"by_fy"`
+	TotalOptionIncome int         `json:"total_option_income"`
+	Unattributed      int         `json:"unattributed"`
+	ByFY              []FnOFYJSON `json:"by_fy"`
 }
 
 // FnOFYJSON is a per-FY F&O option income total.
@@ -68,24 +68,24 @@ type WarningJSON struct {
 
 // TradeJSON is the JSON representation of a realized trade.
 type TradeJSON struct {
-	FY           string  `json:"fy"`
-	Type         string  `json:"type"`
-	Ticker       string  `json:"ticker"`
-	BuyDate      string  `json:"buy_date"`
-	SellDate     string  `json:"sell_date"`
-	HoldDays     int     `json:"hold_days"`
-	Quantity     int     `json:"quantity"`
-	BuyPrice     float64 `json:"buy_price"`
-	SellPrice    float64 `json:"sell_price"`
-	Invested     int     `json:"invested"`
-	SaleValue    int     `json:"sale_value"`
+	FY             string  `json:"fy"`
+	Type           string  `json:"type"`
+	Ticker         string  `json:"ticker"`
+	BuyDate        string  `json:"buy_date"`
+	SellDate       string  `json:"sell_date"`
+	HoldDays       int     `json:"hold_days"`
+	Quantity       int     `json:"quantity"`
+	BuyPrice       float64 `json:"buy_price"`
+	SellPrice      float64 `json:"sell_price"`
+	Invested       int     `json:"invested"`
+	SaleValue      int     `json:"sale_value"`
 	EquityGL       int     `json:"equity_gl"`
 	DividendIncome int     `json:"dividend_income,omitempty"`
 	OptionIncome   int     `json:"option_income,omitempty"`
 	NiftyBuyTRI    float64 `json:"nifty_buy_tri"`
-	NiftySellTRI float64 `json:"nifty_sell_tri"`
-	NiftyReturn  int     `json:"nifty_return"`
-	Alpha        int     `json:"alpha"`
+	NiftySellTRI   float64 `json:"nifty_sell_tri"`
+	NiftyReturn    int     `json:"nifty_return"`
+	Alpha          int     `json:"alpha"`
 }
 
 // OpenJSON is the JSON representation of an open position.
@@ -131,24 +131,24 @@ func WriteJSON(path string, trades []matcher.RealizedTrade, open []matcher.OpenP
 	for i, t := range trades {
 		alpha := int(t.EquityGL - t.NiftyReturn)
 		sc.Trades[i] = TradeJSON{
-			FY:           t.FY,
-			Type:         t.Type,
-			Ticker:       t.Symbol,
-			BuyDate:      t.BuyDate.Format("2006-01-02"),
-			SellDate:     t.SellDate.Format("2006-01-02"),
-			HoldDays:     t.HoldDays,
-			Quantity:     int(t.Quantity),
-			BuyPrice:     roundTo2(t.BuyPrice),
-			SellPrice:    roundTo2(t.SellPrice),
-			Invested:     int(t.Invested),
-			SaleValue:    int(t.SaleValue),
+			FY:             t.FY,
+			Type:           t.Type,
+			Ticker:         t.Symbol,
+			BuyDate:        t.BuyDate.Format("2006-01-02"),
+			SellDate:       t.SellDate.Format("2006-01-02"),
+			HoldDays:       t.HoldDays,
+			Quantity:       int(t.Quantity),
+			BuyPrice:       roundTo2(t.BuyPrice),
+			SellPrice:      roundTo2(t.SellPrice),
+			Invested:       int(t.Invested),
+			SaleValue:      int(t.SaleValue),
 			EquityGL:       int(t.EquityGL),
 			DividendIncome: int(math.Round(t.DividendIncome)),
 			OptionIncome:   int(math.Round(t.OptionIncome)),
 			NiftyBuyTRI:    roundTo2(t.NiftyBuy),
-			NiftySellTRI: roundTo2(t.NiftySell),
-			NiftyReturn:  int(t.NiftyReturn),
-			Alpha:        alpha,
+			NiftySellTRI:   roundTo2(t.NiftySell),
+			NiftyReturn:    int(t.NiftyReturn),
+			Alpha:          alpha,
 		}
 	}
 

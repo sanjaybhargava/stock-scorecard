@@ -6,9 +6,9 @@ import (
 
 func TestExtractUnderlying(t *testing.T) {
 	tests := []struct {
-		symbol     string
+		symbol         string
 		wantUnderlying string
-		wantType   string
+		wantType       string
 	}{
 		// Standard symbols
 		{"BHARTIARTL20DEC520CE", "BHARTIARTL", "CE"},
