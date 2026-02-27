@@ -27,8 +27,17 @@ var embeddedTRI []byte
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "import":
+			runImport(os.Args[2:])
+			return
 		case "score":
 			runScore(os.Args[2:])
+			return
+		case "correct":
+			runCorrect(os.Args[2:])
+			return
+		case "cockpit":
+			runCockpit(os.Args[2:])
 			return
 		case "legacy":
 			legacyMain()
@@ -36,7 +45,7 @@ func main() {
 		}
 	}
 
-	// Default: run import wizard
+	// Default: run import wizard (no subcommand)
 	runImport(os.Args[1:])
 }
 
@@ -198,6 +207,15 @@ func legacyMain() {
 
 	// Step 4: Score
 	summary := scorer.Score(realized)
+
+	// Include unattributed F&O in overall alpha — it's real income earned
+	totalUnattribFnO := 0.0
+	for _, u := range unattributedFnO {
+		totalUnattribFnO += u.NetPnL
+	}
+	summary.TotalMyReturn += math.Round(totalUnattribFnO)
+	summary.NetAlpha += math.Round(totalUnattribFnO)
+
 	log.Printf("Win rate: %d%%, Net alpha: ₹%d", summary.WinRate, int(summary.NetAlpha))
 
 	// Step 5: Write JSON

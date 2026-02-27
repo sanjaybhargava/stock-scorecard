@@ -46,7 +46,7 @@ const zerodhaHeader = "symbol,isin,trade_date,exchange,segment,series,trade_type
 // consolidates fills, and returns sorted ConsolidatedTrades plus the detected
 // client ID (e.g. "2632" from BT2632_*.csv filenames).
 // excludes is a set of symbols to skip (e.g. LIQUIDBEES, GOLDBEES).
-func ParseDirectory(dir string, excludes []string) ([]ConsolidatedTrade, string, error) {
+func ParseDirectory(dir string, excludes []string, clientFilter ...string) ([]ConsolidatedTrade, string, error) {
 	excludeSet := make(map[string]bool, len(excludes))
 	for _, s := range excludes {
 		excludeSet[strings.ToUpper(strings.TrimSpace(s))] = true
@@ -60,6 +60,23 @@ func ParseDirectory(dir string, excludes []string) ([]ConsolidatedTrade, string,
 	}
 	if len(files) == 0 {
 		return nil, "", fmt.Errorf("no .csv files found in %s", dir)
+	}
+
+	// Filter files by client ID prefix if specified
+	filterID := ""
+	if len(clientFilter) > 0 && clientFilter[0] != "" {
+		filterID = strings.ToUpper(clientFilter[0])
+		prefix := filterID + "_"
+		var filtered []string
+		for _, f := range files {
+			if strings.HasPrefix(filepath.Base(f), prefix) {
+				filtered = append(filtered, f)
+			}
+		}
+		if len(filtered) == 0 {
+			return nil, "", fmt.Errorf("no .csv files matching client %s in %s", filterID, dir)
+		}
+		files = filtered
 	}
 
 	// Extract client ID from filenames

@@ -23,16 +23,18 @@ type RealizedTrade struct {
 	Quantity       float64
 	BuyPrice       float64
 	SellPrice      float64
-	Invested       float64 // Quantity x BuyPrice
-	SaleValue      float64 // Quantity x SellPrice
-	EquityGL       float64 // SaleValue - Invested + DividendIncome + OptionIncome
-	DividendIncome float64 // dividend income during holding period (also included in EquityGL)
-	OptionIncome   float64 // F&O option income attributed to this trade (also included in EquityGL)
-	NiftyBuy       float64 // TRI on buy date
-	NiftySell      float64 // TRI on sell date
-	NiftyReturn    float64 // Invested x (NiftySell/NiftyBuy - 1)
-	FY             string  // FY of sell date, e.g. "FY 2024-25"
-	Type           string  // "Long" if HoldDays > 365, else "Short"
+	Invested       float64   // Quantity x BuyPrice
+	SaleValue      float64   // Quantity x SellPrice
+	EquityGL       float64   // SaleValue - Invested + DividendIncome + OptionIncome
+	DividendIncome float64   // dividend income during holding period (also included in EquityGL)
+	OptionIncome   float64   // F&O option income attributed to this trade (also included in EquityGL)
+	NiftyBuy       float64   // TRI on buy date
+	NiftySell      float64   // TRI on sell date
+	NiftyReturn    float64   // Invested x (NiftySell/NiftyBuy - 1)
+	FY             string    // FY of sell date, e.g. "FY 2024-25"
+	Type           string    // "Long" if HoldDays > 365, else "Short"
+	Tier           MatchTier // 1=exact, 2=intelligent, 3=skipped
+	TierReason     string    // e.g. "transfer_in", "rename:OLD→NEW"
 }
 
 // OpenPosition represents unmatched buy lots still held.
@@ -57,11 +59,22 @@ type SymbolSummary struct {
 // Warning represents an unmatched sell (pre-account holding or missing buy data).
 type Warning struct {
 	Symbol    string
+	ISIN      string
 	SellDate  string
+	SellPrice float64
 	Unmatched float64
 	Total     float64
 	Message   string
 }
+
+// MatchTier indicates how a realized trade was matched.
+type MatchTier int
+
+const (
+	TierExact       MatchTier = 1 // Standard FIFO match
+	TierIntelligent MatchTier = 2 // Auto-matched (e.g. transfer-in detection)
+	TierSkipped     MatchTier = 3 // Unresolved — needs manual input
+)
 
 // buyLot is an internal struct for the FIFO queue.
 type buyLot struct {
@@ -323,6 +336,7 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex, divIdx *d
 						lot.date, lot.price,
 						t.Date, t.AvgPrice,
 						matchQty, triIdx, divIdx,
+						TierExact, "",
 					)
 					if err != nil {
 						return nil, nil, nil, nil, fmt.Errorf("enrich %s: %w", displaySymbol, err)
@@ -341,7 +355,9 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex, divIdx *d
 						remaining, t.Quantity, t.Date.Format("2006-01-02"))
 					warnings = append(warnings, Warning{
 						Symbol:    displaySymbol,
+						ISIN:      isin,
 						SellDate:  t.Date.Format("2006-01-02"),
+						SellPrice: t.AvgPrice,
 						Unmatched: remaining,
 						Total:     t.Quantity,
 						Message:   msg,
@@ -379,7 +395,7 @@ func Match(trades []tradebook.ConsolidatedTrade, triIdx *tri.TRIIndex, divIdx *d
 	return allRealized, allOpen, summaries, warnings, nil
 }
 
-func buildRealizedTrade(symbol, isin string, buyDate time.Time, buyPrice float64, sellDate time.Time, sellPrice float64, qty float64, triIdx *tri.TRIIndex, divIdx *dividend.DividendIndex) (RealizedTrade, error) {
+func buildRealizedTrade(symbol, isin string, buyDate time.Time, buyPrice float64, sellDate time.Time, sellPrice float64, qty float64, triIdx *tri.TRIIndex, divIdx *dividend.DividendIndex, tier MatchTier, tierReason string) (RealizedTrade, error) {
 	niftyBuy, err := triIdx.Lookup(buyDate.Format("2006-01-02"))
 	if err != nil {
 		return RealizedTrade{}, fmt.Errorf("TRI lookup buy %s: %w", buyDate.Format("2006-01-02"), err)
@@ -428,6 +444,8 @@ func buildRealizedTrade(symbol, isin string, buyDate time.Time, buyPrice float64
 		NiftyReturn:    math.Round(niftyReturn),
 		FY:             fiscalYear(sellDate),
 		Type:           tradeType,
+		Tier:           tier,
+		TierReason:     tierReason,
 	}, nil
 }
 

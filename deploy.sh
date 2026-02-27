@@ -11,6 +11,11 @@ set -euo pipefail
 # Usage:
 #   ./deploy.sh
 #   ./deploy.sh --skip-scorecard   # Skip Go build, reuse existing scorecard.json
+#
+# Note: This script uses legacy mode (all-in-one flags).
+# The new two-command workflow is:
+#   stock-scorecard import --source ~/Downloads --tri ~/Downloads/NIFTY500_TRI_Indexed.csv --output ./data/
+#   stock-scorecard score --data ./data/ --client BT2632 --output ./ui/public/scorecard.json
 
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 UI_DIR="$REPO_ROOT/ui"

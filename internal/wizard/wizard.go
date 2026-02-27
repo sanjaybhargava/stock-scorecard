@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"strings"
+	"time"
 
 	"stock-scorecard/internal/matcher"
 	"stock-scorecard/internal/reconciliation"
@@ -37,7 +38,7 @@ func (w *Wizard) ReconcileOpenPositions(open []matcher.OpenPosition, recon *reco
 		invested := math.Round(pos.Quantity * pos.BuyPrice)
 		w.printf("  %d of %d: %s — %.0f shares bought %s @ ₹%.0f (₹%s)\n",
 			i+1, len(open), pos.Symbol, pos.Quantity,
-			pos.BuyDate.Format("2006-01-02"), pos.BuyPrice, formatLakhs(invested))
+			pos.BuyDate.Format("2006-01-02"), pos.BuyPrice, FormatLakhs(invested))
 
 		// Smart recommendation for small positions
 		if invested < 10000 {
@@ -47,13 +48,24 @@ func (w *Wizard) ReconcileOpenPositions(open []matcher.OpenPosition, recon *reco
 		w.printf("          [H]eld  [S]old  s[K]ip → ")
 
 		choice := w.readChoice("hsk")
+		if choice == 0 {
+			break
+		}
 		switch choice {
 		case 'h':
 			w.printf("          ✓ Kept as open position.\n\n")
 		case 's':
 			sellDate := w.readLine("          Sell date (YYYY-MM-DD): ")
+			if _, err := time.Parse("2006-01-02", sellDate); err != nil {
+				w.printf("          ✗ Invalid date %q (expected YYYY-MM-DD). Skipping.\n\n", sellDate)
+				continue
+			}
 			sellPrice := w.readLine("          Sell price per share: ")
 			price := parseFloat(sellPrice)
+			if price <= 0 {
+				w.printf("          ✗ Invalid price %q (must be > 0). Skipping.\n\n", sellPrice)
+				continue
+			}
 			recon.ManualTrades = append(recon.ManualTrades, reconciliation.ManualTrade{
 				Symbol:    pos.Symbol,
 				ISIN:      pos.ISIN,
@@ -89,12 +101,23 @@ func (w *Wizard) ReconcileUnmatchedSells(warnings []matcher.Warning, recon *reco
 		w.printf("          [P]rovide buy details  [S]kip → ")
 
 		choice := w.readChoice("ps")
+		if choice == 0 {
+			break
+		}
 		switch choice {
 		case 'p':
 			buyDate := w.readLine("          Buy date (YYYY-MM-DD): ")
+			if _, err := time.Parse("2006-01-02", buyDate); err != nil {
+				w.printf("          ✗ Invalid date %q (expected YYYY-MM-DD). Skipping.\n\n", buyDate)
+				continue
+			}
 			buyPrice := w.readLine("          Buy price per share: ")
-			isin := w.readLine("          ISIN (or press Enter to skip): ")
 			price := parseFloat(buyPrice)
+			if price <= 0 {
+				w.printf("          ✗ Invalid price %q (must be > 0). Skipping.\n\n", buyPrice)
+				continue
+			}
+			isin := w.readLine("          ISIN (or press Enter to skip): ")
 			recon.ManualTrades = append(recon.ManualTrades, reconciliation.ManualTrade{
 				Symbol:    warn.Symbol,
 				ISIN:      isin,
@@ -119,13 +142,20 @@ func (w *Wizard) printf(format string, args ...any) {
 
 func (w *Wizard) readLine(prompt string) string {
 	w.printf("%s", prompt)
-	line, _ := w.in.ReadString('\n')
+	line, err := w.in.ReadString('\n')
+	if err != nil {
+		return strings.TrimSpace(line)
+	}
 	return strings.TrimSpace(line)
 }
 
 func (w *Wizard) readChoice(valid string) byte {
 	for {
-		line, _ := w.in.ReadString('\n')
+		line, err := w.in.ReadString('\n')
+		if err != nil {
+			w.printf("(cancelled)\n")
+			return 0
+		}
 		line = strings.TrimSpace(strings.ToLower(line))
 		if len(line) > 0 {
 			for _, c := range valid {
@@ -138,8 +168,8 @@ func (w *Wizard) readChoice(valid string) byte {
 	}
 }
 
-// formatLakhs formats a rupee amount in lakhs notation (e.g. 830000 → "8.3L").
-func formatLakhs(amount float64) string {
+// FormatLakhs formats a rupee amount in lakhs notation (e.g. 830000 → "8.3L").
+func FormatLakhs(amount float64) string {
 	if math.Abs(amount) >= 100000 {
 		return fmt.Sprintf("%.1fL", amount/100000)
 	}

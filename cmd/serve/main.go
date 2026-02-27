@@ -29,6 +29,7 @@ import (
 	"stock-scorecard/internal/fno"
 	"stock-scorecard/internal/matcher"
 	"stock-scorecard/internal/output"
+	"stock-scorecard/internal/reconciliation"
 	"stock-scorecard/internal/scorer"
 	"stock-scorecard/internal/tradebook"
 	"stock-scorecard/internal/tri"
@@ -107,7 +108,7 @@ func main() {
 func generateScorecard(dataDir, excludeStr string) ([]byte, error) {
 	// Step 1: Parse equity tradebooks
 	excludes := strings.Split(excludeStr, ",")
-	trades, err := tradebook.ParseDirectory(dataDir, excludes)
+	trades, _, err := tradebook.ParseDirectory(dataDir, excludes)
 	if err != nil {
 		return nil, fmt.Errorf("parse tradebooks: %w", err)
 	}
@@ -147,8 +148,9 @@ func generateScorecard(dataDir, excludeStr string) ([]byte, error) {
 		log.Printf("  No dividends.csv found (optional)")
 	}
 
-	// Step 3: FIFO matching
-	realized, open, _, warnings, err := matcher.Match(trades, triIdx, divIdx)
+	// Step 3: FIFO matching (use built-in defaults for reconciliation)
+	recon := reconciliation.Default()
+	realized, open, _, warnings, err := matcher.Match(trades, triIdx, divIdx, recon)
 	if err != nil {
 		return nil, fmt.Errorf("FIFO match: %w", err)
 	}
@@ -156,7 +158,7 @@ func generateScorecard(dataDir, excludeStr string) ([]byte, error) {
 
 	// Step 3b: F&O attribution (if F&O files exist)
 	var unattributedFnO []fno.UnattributedFnO
-	fnoTrades, err := fno.ParseDirectory(dataDir)
+	fnoTrades, err := fno.ParseDirectory(dataDir, recon.FnORenames)
 	if err == nil && len(fnoTrades) > 0 {
 		log.Printf("  Parsed %d consolidated F&O trades", len(fnoTrades))
 		contracts := fno.ComputeContractPnLs(fnoTrades)

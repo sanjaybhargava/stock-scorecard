@@ -86,6 +86,23 @@ func LoadDividends(path string) (*DividendIndex, error) {
 	return idx, nil
 }
 
+// BuildIndex creates a DividendIndex from fetched dividend events.
+func BuildIndex(divs []FetchedDividend) *DividendIndex {
+	idx := &DividendIndex{data: make(map[string][]DividendEvent)}
+	for _, d := range divs {
+		idx.data[d.Symbol] = append(idx.data[d.Symbol], DividendEvent{
+			ExDate: d.ExDate,
+			Amount: d.Amount,
+		})
+	}
+	for sym := range idx.data {
+		sort.Slice(idx.data[sym], func(i, j int) bool {
+			return idx.data[sym][i].ExDate.Before(idx.data[sym][j].ExDate)
+		})
+	}
+	return idx
+}
+
 // Lookup returns the total dividend per share for a symbol between
 // from (inclusive) and to (exclusive): from <= ex_date < to.
 func (d *DividendIndex) Lookup(symbol string, from, to time.Time) float64 {

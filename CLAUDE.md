@@ -2,32 +2,48 @@
 
 ## Project Overview
 
-**stock-scorecard** is a Go CLI that parses Zerodha tradebook CSVs, NIFTY 500 TRI data, dividend records, and F&O tradebooks to produce a JSON scorecard of realized trades with alpha calculations. Output is consumed by a React scorecard UI deployed to GitHub Pages.
+**stock-scorecard** is a Go CLI that parses Zerodha tradebook CSVs, NIFTY 500 TRI data, dividend records, and F&O tradebooks to produce:
+
+1. **Scorecard** — JSON of realized trades with alpha calculations (consumed by React UI)
+2. **Cockpit** — unrealized portfolio analysis: pass/fail vs Nifty+hurdle, deep-dive cards for underperformers
 
 This is a **standalone module**, separate from `broker-trade-sync`. Different concerns, no shared code.
 
-## Architecture: Import / Score
+## Architecture
 
-The CLI has two subcommands plus a legacy all-in-one mode:
+The CLI has four subcommands plus a legacy all-in-one mode:
 
 ```
-~/Downloads/ (raw CSVs)  →  import wizard  →  ./data/BT2632/ (clean, per-client)  →  score  →  scorecard.json
-                              interactive         source of truth                       batch
-                              one-time             permanent                            repeatable
+~/Downloads/ (raw CSVs)  →  import  →  ./data/{client}/ (clean data)  →  score    →  scorecard.json
+                                                                       →  cockpit  →  cockpit_{client}.json
 ```
+
+| Subcommand | Purpose | Interactive? |
+|------------|---------|-------------|
+| `import` | Parse tradebooks, FIFO match, fetch dividends, write clean data | Optional (`--wizard`) |
+| `score` | Read clean data, compute alpha, generate scorecard JSON | No |
+| `cockpit` | Analyze unrealized portfolio vs Nifty+hurdle | No |
+| `correct` | Apply corrections from edited review CSV | No |
+| (default) | Runs `import` | — |
 
 **Clean data directory structure:**
 ```
 ./data/
-  tri.csv                       # NIFTY 500 TRI — shared across all clients
-  BT2632/
-    trades_BT2632.csv           # deduplicated equity trades
-    fno_BT2632.csv              # deduplicated F&O trades
-    dividends_BT2632.csv        # confirmed dividends
-    reconciliation_BT2632.json  # splits, demergers, manual trades, user decisions
-  BT9999/                       # another client — same structure
-    trades_BT9999.csv
-    ...
+  tri.csv                       # NIFTY 500 TRI — embedded in binary, extracted on first run
+  {clientID}/
+    trades_{clientID}.csv       # deduplicated equity trades
+    fno_{clientID}.csv          # deduplicated F&O trades
+    dividends_{clientID}.csv    # confirmed dividends
+    reconciliation_{clientID}.json  # splits, demergers, manual trades
+    cockpit_{clientID}.json     # cockpit config (tax rate, hurdle, classifications)
+    prices_{date}.json          # cached Yahoo Finance prices
+
+~/Downloads/                    # user-facing outputs
+  realized_{clientID}.csv       # matched buy-sell pairs with alpha
+  unrealized_{clientID}.csv     # open positions (input to cockpit)
+  review_{clientID}.csv         # items needing manual review
+  scorecard_{clientID}.json     # scorecard output
+  portfolio_{clientID}.csv      # ticker/qty/price/mkt_value summary
 ```
 
 ## Folder Structure
@@ -35,50 +51,67 @@ The CLI has two subcommands plus a legacy all-in-one mode:
 ```
 stock-scorecard/
 ├── cmd/
-│   └── scorecard/
-│       ├── main.go              # CLI entry point + subcommand dispatch + legacy mode
-│       ├── import.go            # "import" subcommand — parse raw CSVs, run wizard
-│       └── score.go             # "score" subcommand — read clean data, generate scorecard
+│   ├── scorecard/
+│   │   ├── main.go              # CLI entry point + subcommand dispatch
+│   │   ├── import.go            # "import" — parse raw CSVs, FIFO match, dividends, F&O
+│   │   ├── score.go             # "score" — read clean data, generate scorecard JSON
+│   │   ├── cockpit.go           # "cockpit" — unrealized portfolio analysis
+│   │   └── correct.go           # "correct" — apply review CSV corrections
+│   └── serve/
+│       └── main.go              # Self-contained server (legacy, embeds UI)
 ├── internal/
-│   ├── tradebook/
-│   │   └── parser.go            # Zerodha EQ CSV parsing + dedup + consolidation + client ID
-│   ├── tri/
-│   │   └── loader.go            # TRI CSV loading + date lookup with fallback
+│   ├── tradebook/parser.go      # Zerodha EQ CSV parsing + dedup + consolidation
+│   ├── tri/loader.go            # TRI CSV loading + date lookup with fallback
 │   ├── matcher/
-│   │   └── fifo.go              # FIFO buy-sell matching (reads reconciliation data)
+│   │   ├── fifo.go              # FIFO buy-sell matching
+│   │   ├── transferin.go        # Transfer-in detection (Tier 2 matching)
+│   │   ├── transferin_test.go
+│   │   ├── renames.go           # Symbol rename mappings
+│   │   └── nifty500_prices_20160224.json  # Static buy prices for transfer-ins
 │   ├── dividend/
 │   │   ├── loader.go            # Dividend CSV loading + per-share lookup
-│   │   └── fetcher.go           # Yahoo Finance API dividend fetching + Python fallback
+│   │   └── fetcher.go           # Yahoo Finance API + Python fallback
 │   ├── fno/
-│   │   ├── parser.go            # F&O tradebook CSV parsing + dedup + consolidation
-│   │   └── attributor.go        # Contract P&L computation + pro-rata attribution
-│   ├── scorer/
-│   │   └── scorer.go            # Alpha computation, FY grouping, aggregation
-│   ├── output/
-│   │   └── json.go              # JSON serialization
+│   │   ├── parser.go            # F&O tradebook CSV parsing + dedup
+│   │   └── attributor.go        # Contract P&L + pro-rata attribution
+│   ├── scorer/scorer.go         # Alpha computation, FY grouping, aggregation
+│   ├── output/json.go           # JSON serialization
 │   ├── reconciliation/
-│   │   ├── types.go             # ReconciliationData struct (splits, demergers, manual trades, F&O renames)
-│   │   ├── loader.go            # Load/Save JSON + Default() for BT2632 backward compat
-│   │   └── loader_test.go       # Roundtrip test
+│   │   ├── types.go             # ReconciliationData struct
+│   │   ├── loader.go            # Load/Save JSON + Default() for BT2632
+│   │   └── loader_test.go
 │   ├── clientid/
-│   │   ├── extract.go           # Extract client ID from BT{id}_*.csv filenames
+│   │   ├── extract.go           # Extract client ID from filenames
 │   │   └── extract_test.go
 │   ├── cleandata/
-│   │   ├── writer.go            # Write consolidated trades/F&O to CSV
+│   │   ├── writer.go            # Write trades/F&O/realized/unrealized/review CSVs
 │   │   ├── reader.go            # Read them back
 │   │   └── roundtrip_test.go
-│   └── wizard/
-│       ├── wizard.go            # Interactive reconciliation engine (open positions, unmatched sells)
-│       ├── dividends.go         # Dividend fetching + FY-level confirmation
-│       └── wizard_test.go
+│   ├── wizard/
+│   │   ├── wizard.go            # Interactive reconciliation (open positions, unmatched sells)
+│   │   ├── dividends.go         # Dividend fetching + FY-level confirmation
+│   │   └── wizard_test.go
+│   └── cockpit/
+│       ├── config.go            # CockpitConfig: tax rate, hurdle, classifications, ticker_map
+│       ├── hurdle.go            # EnrichLots, ClassifyStocks (pass/fail/too-early/no-test)
+│       ├── pricer.go            # Yahoo Finance price + stock TRI fetching with caching
+│       ├── fno.go               # F&O attribution for unrealized lots
+│       ├── deepdive.go          # Deep-dive cards for failed stocks
+│       └── output.go            # BuildCockpitJSON + WriteCockpitJSON
 ├── scripts/
-│   └── pull_dividends.py        # Fetches dividend data from Yahoo Finance (Python fallback)
+│   ├── pull_dividends.py        # Yahoo Finance dividend fetcher (Python fallback)
+│   ├── build_cockpit_data.py    # Python cockpit data builder (prices, TRI, deep-dive)
+│   ├── fetch_stock_tri.py       # Fetch stock-level TRI (Adj Close indexed to 100)
+│   └── fetch_nifty500_prices.py # Fetch static prices for transfer-in detection
 ├── ui/                          # React scorecard UI (Vite + Tailwind)
-│   ├── src/
-│   │   └── StockScorecard.jsx   # Single-file React component (3-level drill-down)
-│   └── public/
-│       └── scorecard.json       # Generated scorecard (copied into build)
-├── deploy.sh                    # Build + deploy to GitHub Pages
+│   ├── src/StockScorecard.jsx   # 3-level drill-down scorecard
+│   └── public/scorecard.json
+├── ui-cockpit/                  # React cockpit UI (Vite + Tailwind)
+│   ├── src/App.jsx              # Cockpit dashboard (pass/fail/deep-dive)
+│   └── public/cockpit.json
+├── build-release.sh             # Cross-compile for Mac ARM/Intel + Windows
+├── deploy.sh                    # Build + deploy scorecard to gh-pages
+├── deploy-cockpit.sh            # Build + deploy cockpit to gh-pages
 ├── CLAUDE.md
 ├── go.mod
 └── go.sum
@@ -86,272 +119,201 @@ stock-scorecard/
 
 ## CLI Interface
 
-### New: Two-Command Workflow
+### Import (Non-Interactive Default)
 
 ```bash
-# Import: parse raw CSVs → interactive wizard → clean data files
+# Parse tradebooks, FIFO match, fetch dividends, F&O attribution, score
+stock-scorecard import --client ZY7393
+
+# With all flags
 stock-scorecard import \
   --source ~/Downloads \
-  --tri ~/Downloads/NIFTY500_TRI_Indexed.csv \
-  --output ./data/
+  --output ./data/ \
+  --client ZY7393 \
+  --exclude LIQUIDBEES
 
-# Score: read clean data → generate scorecard JSON (batch, repeatable)
-stock-scorecard score \
-  --data ./data/ \
-  --client BT2632 \
-  --output ./scorecard.json
-
-# Second user — TRI already in ./data/, no --tri needed
-stock-scorecard import --source ~/wife-downloads --output ./data/
-stock-scorecard score --data ./data/ --client BT9999 --output ./wife-scorecard.json
+# Interactive wizard (step-by-step confirmation)
+stock-scorecard import --client ZY7393 --wizard
 ```
 
-**Import flags:**
-- `--source` (required): Directory containing raw Zerodha tradebook CSVs
-- `--tri` (required on first import): Path to NIFTY 500 TRI CSV — copied to `./data/tri.csv`
-- `--output` (optional): Output directory for clean data. Default: `./data`
+**Flags:**
+- `--source` (optional): Directory containing raw CSVs. Default: `~/Downloads`
+- `--output` (optional): Output directory. Default: `./data`
+- `--client` (optional): Filter files by client ID prefix
 - `--exclude` (optional): Comma-separated symbols to skip. Default: `LIQUIDBEES`
-- `--skip-dividends` (optional): Skip dividend fetching
+- `--wizard` (optional): Run interactive mode
 
-**Score flags:**
-- `--data` (optional): Data directory. Default: `./data`
-- `--client` (required): Client ID (e.g. `BT2632` or `2632`)
-- `--output` (optional): Path for output JSON. Default: `./scorecard.json`
-- `--verbose` (optional): Print per-symbol FIFO summary
-
-### Legacy Mode (Backward Compatible)
+### Score
 
 ```bash
-go run ./cmd/scorecard \
-  --tradebooks ~/Downloads \
-  --tri ~/Downloads/NIFTY500_TRI_Indexed.csv \
-  --dividends ./dividends.csv \
-  --fno ~/Downloads \
-  --output ./scorecard.json
+stock-scorecard score --client BT2632 --data ./data/ --output ./scorecard.json
 ```
 
-**Legacy flags:**
-- `--tradebooks` (required): Directory containing Zerodha equity tradebook CSVs
-- `--tri` (required): Path to NIFTY 500 TRI Indexed CSV file
-- `--output` (required): Path for output JSON file
-- `--dividends` (optional): Path to dividends CSV
-- `--fno` (optional): Directory containing F&O tradebook CSVs
-- `--reconciliation` (optional): Path to reconciliation JSON (auto-loads if matching file exists)
-- `--wizard` (optional): Run interactive reconciliation wizard after FIFO matching
-- `--exclude` (optional): Comma-separated symbols to skip. Default: `LIQUIDBEES`
-- `--broker` (optional): Broker format. Default: `zerodha`
-- `--verbose` (optional): Print per-symbol FIFO summary to stderr
+### Cockpit
+
+```bash
+stock-scorecard cockpit --client ZY7393
+```
+
+**Flags:**
+- `--client` (required): Client ID
+- `--data` (optional): Data directory. Default: `./data`
+- `--source` (optional): Directory with unrealized CSV. Default: `~/Downloads`
+- `--output` (optional): Output JSON path. Default: `./cockpit_{clientID}.json`
+- `--report-date` (optional): Price date. Default: today or from config
+- `--skip-deep-dive` (optional): Skip deep-dive analysis
+
+### Correct
+
+```bash
+stock-scorecard correct --input ~/Downloads/review_ZY7393.csv
+```
+
+### Cross-Platform Build
+
+```bash
+./build-release.sh    # → ./dist/stock-scorecard-mac-m, -mac-intel, -windows.exe
+```
 
 ## Processing Pipeline
 
-### Import Pipeline
+### Import Pipeline (3-Tier Matching)
 ```
-Parse EQ/FnO CSVs → Copy TRI → FIFO Match → Interactive Wizard → Fetch Dividends → Write Clean Data
-```
-
-### Score Pipeline
-```
-Read Clean Data → Load TRI → Load Dividends → FIFO Match → F&O Attribution → Score → JSON
+Parse EQ/FnO CSVs → FIFO Match (Tier 1) → Transfer-In Detection (Tier 2) → Dividends → F&O Attribution → Score → JSON
 ```
 
-### Step 1: Parse & Dedup Equity (internal/tradebook/parser.go)
+- **Tier 1 (Exact):** FIFO buy-sell matching from tradebooks
+- **Tier 2 (Intelligent):** Unmatched sells auto-matched with static 2016-02-24 buy prices
+- **Tier 3 (Skipped):** Unresolved sells (bonds/NCDs, missing prices) → review CSV
 
-1. Read all `*.csv` files from source directory; skip files that don't match Zerodha 13-column header
-2. Dedup by `trade_id` globally (defensive against duplicate/overlapping files)
-3. Skip ETFs (`INF*` ISIN prefix) and excluded symbols
-4. Consolidate fills: group by `(ISIN, trade_date, trade_type, order_id)`, compute VWAP
-5. Round quantities to integers (equity = whole shares)
-6. Extract client ID from `BT{id}_*.csv` filenames
+### Cockpit Pipeline
+```
+Load Unrealized CSV → Fetch Prices (Yahoo) → Load Nifty TRI → Enrich Lots → F&O Attribution → Classify (Pass/Fail) → Deep-Dive → JSON
+```
 
-### Step 2: Load TRI Index (internal/tri/loader.go)
+### Cockpit Classification
 
-- Load NIFTY 500 TRI into `map[string]float64` keyed by `YYYY-MM-DD`
-- Weekend/holiday fallback: binary search for most recent prior trading day
+Each stock is tested against **Nifty CAGR + hurdle** over its holding period:
 
-### Step 2b: Load Dividends (internal/dividend/loader.go + fetcher.go)
+| Category | Condition |
+|----------|-----------|
+| **Pass** | Current value ≥ Nifty+hurdle target |
+| **Fail** | Current value < Nifty+hurdle target (deficit shown) |
+| **Too Early** | All lots held < 1 year |
+| **No Test** | Asset class = `index_mf` (index funds, bonds, liquid funds) |
 
-- **Loader:** Parse CSV with columns: `symbol, ex_date, amount` (split-adjusted per-share)
-- **Fetcher:** Go-native Yahoo Finance API + Python `pull_dividends.py` fallback
-- Lookup: sum all dividends where `buy_date <= ex_date < sell_date`
+Default hurdle: 3% for stocks, configurable per asset class.
 
-### Step 3: FIFO Matching (internal/matcher/fifo.go)
-
-1. Apply corporate actions from reconciliation data: stock splits, demergers, manual trades
-2. Group by ISIN, sort by (date, trade_type)
-3. FIFO queue: on sell, consume oldest buy lots, splitting partial lots
-4. Each matched pair → `RealizedTrade` enriched with TRI + dividends
-5. Remaining buy lots → `OpenPosition`
-6. Unmatched sells → `Warning` (pre-account holdings)
-
-### Step 3a: Reconciliation Wizard (internal/wizard/)
-
-Interactive prompts for:
-- **Open positions:** `[H]eld / [S]old / [K]ip` — if sold, collect date + price → manual sell
-- **Unmatched sells:** `[P]rovide buy / [S]kip` — collect buy date + price → manual buy
-- **Dividends:** Fetch from Yahoo Finance, show FY totals, `[Y/n]` confirmation
-
-### Step 3b: F&O Attribution (internal/fno/)
-
-**Parser** (`parser.go`):
-1. Read `*.csv` files from directory (14-column header with `expiry_date`)
-2. Extract underlying + option type from symbol via regex: `^([A-Z][A-Z&-]*[A-Z])\d{2}[A-Z]{3}\d+(?:\.\d+)?(CE|PE)$`
-3. Apply F&O symbol renames from reconciliation data
-4. Dedup by `trade_id`, consolidate fills with VWAP
-
-**Attributor** (`attributor.go`):
-1. Group F&O trades by `(underlying, raw_symbol)` → one `ContractPnL` per option contract lifecycle
-2. Contract P&L: `net_pnl = Σ(sell_value) - Σ(buy_value)`
-3. **Two-pass attribution** to equity realized trades:
-   - **Pass 1 (overlap):** For CE and PE contracts, find equity trades where holding period overlaps the contract's active period. Weight = `shares × overlap_days`.
-   - **Pass 2 (next-buy, PE only):** For put contracts with no overlap, find the nearest equity buy_date ≥ put's expiry and distribute pro-rata by quantity.
-4. Unattributed contracts → `UnattributedFnO` list
-
-### Step 4: Score & Aggregate (internal/scorer/scorer.go)
-
-- **Alpha** = EquityGL - NiftyReturn (per trade). EquityGL includes capital G/L + dividends + F&O income.
-- **Win rate** = % of unique (ticker, FY, type) combos with aggregate alpha ≥ 0
-- **FY:** Based on sell date. Apr 1 → Mar 31 (Indian fiscal year)
-- **Long vs Short:** HoldDays > 365 = Long, else Short (Indian LTCG/STCG threshold)
-
-### Step 5: JSON Output (internal/output/json.go)
-
-Serializes to JSON with: `trades`, `open_positions`, `warnings`, `summary`, `dividend_summary`, `fno_summary`, `unattributed_fno`.
-
-## Reconciliation Data (internal/reconciliation/)
-
-Per-client JSON file storing corporate action data that was previously hardcoded:
+## Cockpit Config (`data/{clientID}/cockpit_{clientID}.json`)
 
 ```json
 {
-  "client_id": "BT2632",
-  "splits": [
-    {"old_isin": "INE935N01012", "new_isin": "INE935N01020", "ratio": 5, "note": "DIXON 1:5"}
-  ],
-  "demergers": [
-    {"parent_isin": "INE002A01018", "child_isin": "INE758E01017", "child_symbol": "JIOFIN", "record_date": "2023-07-20", "parent_cost_pct": 0.9532}
-  ],
-  "manual_trades": [
-    {"symbol": "MPHASIS", "isin": "INE356A01018", "date": "2022-01-27", "trade_type": "buy", "quantity": 700, "price": 3000}
-  ],
-  "fno_renames": {"MOTHERSUMI": "MOTHERSON", "HDFC": "HDFCBANK"}
+  "client_id": "ZY7393",
+  "client_name": "Vimal Kapur",
+  "report_date": "2026-02-23",
+  "expected_total_income": 15000000,
+  "default_hurdle_pct": 3,
+  "ticker_map": {
+    "MINDTREE": "LTIM.NS",
+    "NAUKRI": "NAUKRI.NS"
+  },
+  "classifications": {
+    "MONIFTY500": {"asset_class": "index_mf", "hurdle_pct": 0},
+    "MOMENTUM50": {"asset_class": "active_mf", "hurdle_pct": 2},
+    "GOLDBEES": {"asset_class": "gold_etf", "hurdle_pct": 3},
+    "LIQUIDBEES": {"asset_class": "index_mf", "hurdle_pct": 0},
+    "851HUDCO28-NB": {"asset_class": "index_mf", "hurdle_pct": 0},
+    "PPFCF": {"asset_class": "active_mf", "hurdle_pct": 2}
+  },
+  "price_only_symbols": ["GOLDBEES", "MONIFTY500", "MOMENTUM50", "851HUDCO28-NB", "LIQUIDBEES"],
+  "display_names": {"RELIANCE": "Reliance Industries", ...},
+  "manual_lots": [],
+  "market_phases": [
+    {"regime": "Bull", "start": "2016-02-24", "end": "2018-01-31"},
+    {"regime": "Bear", "start": "2018-02-01", "end": "2020-03-23"}
+  ]
 }
 ```
 
-- `Default()` returns BT2632 hardcoded data for backward compatibility
-- Auto-loaded from `reconciliation_{clientID}.json` if found next to output
-- Updated interactively by the wizard
+**Key config fields:**
+- `ticker_map`: Override Yahoo Finance symbol (e.g. MINDTREE→LTIM.NS)
+- `classifications`: Asset class + hurdle per symbol. `index_mf` = no test
+- `price_only_symbols`: Skip stock TRI fetch, use price-only CAGR
+- `manual_lots`: Extra positions not in unrealized CSV (added to portfolio)
+- `market_phases`: Bull/Bear/Sideways regimes for deep-dive charts
 
-## Input Files
+**Special cases:**
+- Bonds (e.g. `851HUDCO28-NB`): No Yahoo price — manually add to `data/{clientID}/prices_{date}.json`
+- MF NAVs: No Yahoo ticker — manually add to price cache (fetch from MFAPI: `api.mfapi.in/mf/{schemeCode}/latest`)
+- BSE suffixes: Strip `-BE` from symbols in unrealized CSV (e.g. `KWIL-BE` → `KWIL`)
 
-### Equity Tradebook CSVs (Zerodha)
+## Unrealized CSV Format (Input to Cockpit)
 
-Files: `BT{client_id}_{startYYYYMMDD}_{endYYYYMMDD}.csv` (13 columns)
-
-```
-symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time
-```
-
-### F&O Tradebook CSVs (Zerodha)
-
-Files: `BT{client_id}_FO_{startYYYYMMDD}_{endYYYYMMDD}.csv` (14 columns — same as equity + `expiry_date`)
-
-```
-symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time,expiry_date
+```csv
+symbol,isin,buy_date,quantity,buy_price,invested
+RELIANCE,INE002A01018,2020-10-27,2940,1004.94,2954530.0
 ```
 
-### NIFTY 500 TRI Indexed CSV
-
-```
-Date,TRI_Indexed
-```
-
-### Dividends CSV
-
-```
-symbol,ex_date,amount
-```
-
-## Output JSON Structure
-
-```json
-{
-  "generated_at": "2026-02-25T12:00:00Z",
-  "trades": [{
-    "fy": "FY 2024-25", "type": "Long", "ticker": "BHARTIARTL",
-    "buy_date": "2023-08-30", "sell_date": "2025-01-06", "hold_days": 494,
-    "quantity": 950, "buy_price": 859.70, "sell_price": 1600.00,
-    "invested": 816715, "sale_value": 1520000,
-    "equity_gl": 703285,
-    "dividend_income": 12000,
-    "option_income": 234567,
-    "nifty_buy_tri": 280.50, "nifty_sell_tri": 410.20,
-    "nifty_return": 377500, "alpha": 325785
-  }],
-  "open_positions": [{...}],
-  "warnings": [{...}],
-  "summary": {...},
-  "dividend_summary": {...},
-  "fno_summary": {...},
-  "unattributed_fno": [{...}]
-}
-```
+Generated by `import` command. Can be manually edited to add transfer-in positions, MF holdings, bonds.
 
 ## Edge Cases
 
-- **Partial sells (FIFO splitting):** A buy of 1000 may sell across 3 dates (300, 500, 200) — split buy lots
-- **Cross-FY holdings:** Bought FY20-21, sold FY24-25 — single realized trade, FY = sell date
-- **Missing TRI dates:** Weekend/holiday → use most recent prior trading day
-- **Open positions:** Buy lots without matching sells → `open_positions` array
-- **Symbol name changes:** ISIN is stable across renames (MOTHERSUMI→MOTHERSON). Use ISIN for matching
-- **Stock splits / demergers:** Handled via reconciliation JSON (previously hardcoded)
-- **F&O decimal strikes:** Regex handles symbols like `NTPC23JUN182.5CE`, `POWERGRID23SEP198.75CE`
-- **F&O symbol renames:** Stored in reconciliation JSON (e.g. MOTHERSUMI→MOTHERSON, HDFC→HDFCBANK)
-- **Cash-secured puts:** No overlap with equity → attributed via "next buy" fallback
-- **Index options (NIFTY, BANKNIFTY):** No underlying equity → unattributed, reported separately
-- **Multi-client:** Each client gets own data directory, TRI shared across all
-- **Backward compatibility:** Legacy flags still work identically; `Default()` provides BT2632 data
+- **Partial sells (FIFO splitting):** A buy of 1000 may sell across 3 dates — split buy lots
+- **Cross-FY holdings:** FY = sell date (Indian fiscal year Apr 1 → Mar 31)
+- **Missing TRI dates:** Weekend/holiday → binary search for most recent prior trading day
+- **Missing Nifty TRI for buy date:** Lot still enriched with zero Nifty metrics (bonds, pre-2016 buys)
+- **Symbol name changes:** ISIN is stable across renames. Use ISIN for matching
+- **Stock splits / demergers:** Via reconciliation JSON
+- **F&O decimal strikes:** Regex handles `NTPC23JUN182.5CE`
+- **Cash-secured puts:** No overlap → "next buy" fallback attribution
+- **Index options:** No underlying equity → unattributed, included in overall alpha
+- **Transfer-ins:** Unmatched sells auto-matched with static historical prices
+- **Bonds/NCDs:** No Yahoo Finance data — manual price injection in cache
+- **MF NAVs:** Not on Yahoo — manual price injection (MFAPI source)
+- **Multi-client:** Each client gets own data dir, TRI shared
 
 ## Deploy
 
 ```bash
-# Full deploy (generates scorecard + builds UI + deploys to gh-pages)
+# Scorecard (realized trades)
 ./deploy.sh
 
-# Skip scorecard generation (reuse existing scorecard.json)
-./deploy.sh --skip-scorecard
+# Cockpit (unrealized portfolio) — generates + builds UI + pushes
+./deploy-cockpit.sh ZY7393
+./deploy-cockpit.sh --all
+
+# Cross-platform binaries for beta distribution
+./build-release.sh    # → ./dist/
 ```
 
-The deploy script:
-1. Builds Go CLI, generates `dividends.csv` if missing (via `pull_dividends.py`), then runs scorecard with all flags
-2. Builds React UI via `npm run build` in `ui/`
-3. Verifies `index.html` + `scorecard.json` in build output
-4. Copies build to `gh-pages` branch and force-pushes
-
-**Live site:** https://sanjaybhargava.github.io/stock-scorecard/
+**Live sites:**
+- Scorecard: https://sanjaybhargava.github.io/stock-scorecard/
+- MIL cockpit: https://sanjaybhargava.github.io/vimal-stock-scorecard/cockpit/?client=ZY7393
 
 ## Commands
 
 ```bash
-# New workflow: import + score
-stock-scorecard import --source ~/Downloads --tri ~/Downloads/NIFTY500_TRI_Indexed.csv --output ./data/
-stock-scorecard score --data ./data/ --client BT2632 --output ./scorecard.json
+# Import + score (default non-interactive)
+stock-scorecard import --client ZY7393
 
-# Legacy: all-in-one (still works)
-go run ./cmd/scorecard \
-  --tradebooks ~/Downloads \
-  --tri ~/Downloads/NIFTY500_TRI_Indexed.csv \
-  --dividends ./dividends.csv \
-  --fno ~/Downloads \
-  --output ./scorecard.json
+# Cockpit
+stock-scorecard cockpit --client ZY7393
+
+# Apply corrections from review CSV
+stock-scorecard correct --input ~/Downloads/review_ZY7393.csv
 
 # Build binary
 go build -o stock-scorecard ./cmd/scorecard
 
+# Cross-compile for distribution
+./build-release.sh
+
 # Test
 go test ./...
 
-# Deploy to GitHub Pages
-./deploy.sh
+# Deploy
+./deploy.sh                        # scorecard
+./deploy-cockpit.sh ZY7393         # cockpit
 ```
 
 ## Coding Conventions
@@ -360,12 +322,21 @@ go test ./...
 - Idiomatic Go error handling: check and wrap with context
 - `log` package for pipeline progress (not `fmt.Println`)
 - Package names: lowercase, single word
-- No external dependencies beyond stdlib (except `net/http` for dividend fetching)
+- No external dependencies beyond stdlib (except `net/http` for Yahoo Finance)
 - All monetary values rounded to int (rupees) for display; floating point internally
+- TRI embedded in binary via `//go:embed tri_embedded.csv`
+
+## Clients
+
+| Client | ID | Notes |
+|--------|------|-------|
+| Sanjay | BT2632 / CI8364 | Equity + F&O, wife CI8364 |
+| MIL (Vimal Kapur) | ZY7393 | 452 realized, 39 unrealized tickers, transfer-ins from 2016 |
 
 ## Future Enhancements
 
 - Brokerage/STT deduction
-- Unrealized scorecard (live prices)
+- Auto-fetch MF NAVs from MFAPI
 - Multi-broker parsers (Groww, ICICI)
 - Futures (not just options) attribution
+- Auto-strip BSE suffixes (-BE, -BL) from symbols

@@ -57,7 +57,7 @@ const fnoHeader = "symbol,isin,trade_date,exchange,segment,series,trade_type,auc
 // sorted FnOTrades. Returns nil, nil if no F&O tradebooks are found.
 // fnoRenames maps old F&O underlying names to current equity display names
 // (e.g. "MOTHERSUMI" → "MOTHERSON"). Pass nil for no renames.
-func ParseDirectory(dir string, fnoRenames map[string]string) ([]FnOTrade, error) {
+func ParseDirectory(dir string, fnoRenames map[string]string, clientFilter ...string) ([]FnOTrade, error) {
 	// Glob all CSVs and rely on header validation to identify F&O tradebooks.
 	// This supports any file naming convention (BT*_FO_*, client_id_FO_*, etc.).
 	files, err := filepath.Glob(filepath.Join(dir, "*.csv"))
@@ -66,6 +66,22 @@ func ParseDirectory(dir string, fnoRenames map[string]string) ([]FnOTrade, error
 	}
 	if len(files) == 0 {
 		return nil, fmt.Errorf("no .csv files found in %s", dir)
+	}
+
+	// Filter files by client ID prefix if specified
+	if len(clientFilter) > 0 && clientFilter[0] != "" {
+		prefix := strings.ToUpper(clientFilter[0]) + "_"
+		var filtered []string
+		for _, f := range files {
+			if strings.HasPrefix(filepath.Base(f), prefix) {
+				filtered = append(filtered, f)
+			}
+		}
+		if len(filtered) == 0 {
+			// No F&O files for this client is normal
+			return nil, nil
+		}
+		files = filtered
 	}
 
 	seenTradeIDs := make(map[string]bool)

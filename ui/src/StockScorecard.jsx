@@ -272,7 +272,9 @@ export default function StockScorecard() {
     const fs = rawData.fno_summary;
     const byFy = {};
     (fs.by_fy || []).forEach(d => { byFy[d.fy] = d.option_income; });
-    return { total: fs.total_option_income || 0, unattributed: fs.unattributed || 0, byFy };
+    const attributed = fs.total_option_income || 0;
+    const unattributed = fs.unattributed || 0;
+    return { total: attributed + unattributed, attributed, unattributed, byFy };
   }, [rawData]);
 
   const summary = useMemo(() => {
@@ -395,10 +397,13 @@ export default function StockScorecard() {
       all.myReturn += s.myReturn;
       all.niftyReturn += s.niftyReturn;
     });
+    // Include unattributed F&O in overall return — it's real income earned
+    const unattribFnO = fnoSummary ? fnoSummary.unattributed : 0;
+    all.myReturn += unattribFnO;
     all.alpha = all.myReturn - all.niftyReturn;
     const total = passes.count + fails.count;
     return { all, passes, fails, winRate: total > 0 ? Math.round((passes.count / total) * 100) : 0 };
-  }, [TRADES, summary]);
+  }, [TRADES, summary, fnoSummary]);
 
   if (error) return <div className="min-h-screen bg-slate-100 flex items-center justify-center"><div className="text-red-600">Failed to load scorecard: {error}</div></div>;
   if (!rawData) return <div className="min-h-screen bg-slate-100 flex items-center justify-center"><div className="text-slate-500">Loading scorecard…</div></div>;

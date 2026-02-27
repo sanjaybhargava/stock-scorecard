@@ -82,7 +82,7 @@ func TestUnmatchedSell_ProvideBuy(t *testing.T) {
 
 	recon := &reconciliation.ReconciliationData{}
 	warnings := []matcher.Warning{
-		{Symbol: "RELIANCE", SellDate: "2023-12-01", Unmatched: 200, Total: 200},
+		{Symbol: "RELIANCE", ISIN: "INE002A01018", SellDate: "2023-12-01", SellPrice: 2500, Unmatched: 200, Total: 200},
 	}
 
 	changed := w.ReconcileUnmatchedSells(warnings, recon)
@@ -106,7 +106,7 @@ func TestUnmatchedSell_Skip(t *testing.T) {
 
 	recon := &reconciliation.ReconciliationData{}
 	warnings := []matcher.Warning{
-		{Symbol: "RELIANCE", SellDate: "2023-12-01", Unmatched: 200, Total: 200},
+		{Symbol: "RELIANCE", ISIN: "INE002A01018", SellDate: "2023-12-01", SellPrice: 2500, Unmatched: 200, Total: 200},
 	}
 
 	changed := w.ReconcileUnmatchedSells(warnings, recon)
@@ -127,10 +127,107 @@ func TestFormatLakhs(t *testing.T) {
 		{99999, "99999"},
 	}
 	for _, tt := range tests {
-		got := formatLakhs(tt.amount)
+		got := FormatLakhs(tt.amount)
 		if got != tt.want {
-			t.Errorf("formatLakhs(%.0f) = %q, want %q", tt.amount, got, tt.want)
+			t.Errorf("FormatLakhs(%.0f) = %q, want %q", tt.amount, got, tt.want)
 		}
+	}
+}
+
+func TestCancelledInput(t *testing.T) {
+	// EOF immediately — simulates Ctrl-C / pipe close
+	input := ""
+	var out bytes.Buffer
+	w := New(strings.NewReader(input), &out)
+
+	recon := &reconciliation.ReconciliationData{}
+	open := []matcher.OpenPosition{
+		{Symbol: "HDFCBANK", ISIN: "INE040A01034", BuyDate: time.Date(2023, 5, 15, 0, 0, 0, 0, time.UTC), Quantity: 500, BuyPrice: 1650},
+		{Symbol: "INFY", ISIN: "INE009A01021", BuyDate: time.Date(2024, 1, 10, 0, 0, 0, 0, time.UTC), Quantity: 1000, BuyPrice: 1500},
+	}
+
+	changed := w.ReconcileOpenPositions(open, recon)
+	if changed {
+		t.Error("expected no changes on cancelled input")
+	}
+	if !strings.Contains(out.String(), "(cancelled)") {
+		t.Error("expected '(cancelled)' in output")
+	}
+}
+
+func TestInvalidSellDate(t *testing.T) {
+	input := "s\nbaddate\n"
+	var out bytes.Buffer
+	w := New(strings.NewReader(input), &out)
+
+	recon := &reconciliation.ReconciliationData{}
+	open := []matcher.OpenPosition{
+		{Symbol: "HDFCBANK", ISIN: "INE040A01034", BuyDate: time.Date(2023, 5, 15, 0, 0, 0, 0, time.UTC), Quantity: 500, BuyPrice: 1650},
+	}
+
+	w.ReconcileOpenPositions(open, recon)
+	if len(recon.ManualTrades) != 0 {
+		t.Errorf("expected 0 manual trades for invalid date, got %d", len(recon.ManualTrades))
+	}
+	if !strings.Contains(out.String(), "Invalid date") {
+		t.Error("expected 'Invalid date' in output")
+	}
+}
+
+func TestInvalidSellPrice(t *testing.T) {
+	input := "s\n2024-08-15\n0\n"
+	var out bytes.Buffer
+	w := New(strings.NewReader(input), &out)
+
+	recon := &reconciliation.ReconciliationData{}
+	open := []matcher.OpenPosition{
+		{Symbol: "HDFCBANK", ISIN: "INE040A01034", BuyDate: time.Date(2023, 5, 15, 0, 0, 0, 0, time.UTC), Quantity: 500, BuyPrice: 1650},
+	}
+
+	w.ReconcileOpenPositions(open, recon)
+	if len(recon.ManualTrades) != 0 {
+		t.Errorf("expected 0 manual trades for invalid price, got %d", len(recon.ManualTrades))
+	}
+	if !strings.Contains(out.String(), "Invalid price") {
+		t.Error("expected 'Invalid price' in output")
+	}
+}
+
+func TestInvalidBuyDate(t *testing.T) {
+	input := "p\nnot-a-date\n"
+	var out bytes.Buffer
+	w := New(strings.NewReader(input), &out)
+
+	recon := &reconciliation.ReconciliationData{}
+	warnings := []matcher.Warning{
+		{Symbol: "RELIANCE", ISIN: "INE002A01018", SellDate: "2023-12-01", SellPrice: 2500, Unmatched: 200, Total: 200},
+	}
+
+	w.ReconcileUnmatchedSells(warnings, recon)
+	if len(recon.ManualTrades) != 0 {
+		t.Errorf("expected 0 manual trades for invalid buy date, got %d", len(recon.ManualTrades))
+	}
+	if !strings.Contains(out.String(), "Invalid date") {
+		t.Error("expected 'Invalid date' in output")
+	}
+}
+
+func TestInvalidBuyPrice(t *testing.T) {
+	input := "p\n2022-06-15\n0\n"
+	var out bytes.Buffer
+	w := New(strings.NewReader(input), &out)
+
+	recon := &reconciliation.ReconciliationData{}
+	warnings := []matcher.Warning{
+		{Symbol: "RELIANCE", ISIN: "INE002A01018", SellDate: "2023-12-01", SellPrice: 2500, Unmatched: 200, Total: 200},
+	}
+
+	w.ReconcileUnmatchedSells(warnings, recon)
+	if len(recon.ManualTrades) != 0 {
+		t.Errorf("expected 0 manual trades for invalid buy price, got %d", len(recon.ManualTrades))
+	}
+	if !strings.Contains(out.String(), "Invalid price") {
+		t.Error("expected 'Invalid price' in output")
 	}
 }
 
@@ -188,7 +285,7 @@ func TestSmallUnmatchedSellRecommendation(t *testing.T) {
 
 	recon := &reconciliation.ReconciliationData{}
 	warnings := []matcher.Warning{
-		{Symbol: "MON100", SellDate: "2021-07-01", Unmatched: 7, Total: 7},
+		{Symbol: "MON100", ISIN: "INE123B01010", SellDate: "2021-07-01", SellPrice: 100, Unmatched: 7, Total: 7},
 	}
 
 	w.ReconcileUnmatchedSells(warnings, recon)

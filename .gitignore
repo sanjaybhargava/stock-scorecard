@@ -1,11 +1,28 @@
-# Go
-stock-scorecard
-scorecard.json
+# Go binaries
+/stock-scorecard
+/stock-scorecard-arm64
+/stock-scorecard-serve
+/scorecard
+/scorecard.json
+/cockpit_*.json
+/cockpit_go.json
 bin/
+dist/
+
+# Data (per-client, not source code)
+data/
+
+# Cached prices/TRI (regenerated at runtime)
+scripts/prices_*.json
+scripts/historical_prices.json
+scripts/stock_tri.json
+scripts/stock_prospects.json
 
 # UI
 ui/node_modules/
 ui/dist/
+ui-cockpit/node_modules/
+ui-cockpit/dist/
 
 # OS
 .DS_Store

@@ -68,7 +68,7 @@ func (w *Wizard) ReconcileDividends(tickers []string) *DividendResult {
 	})
 
 	for _, s := range summaries {
-		w.printf("  %s:  ₹%s  (%d stocks)\n", s.fy, formatLakhs(math.Round(s.total)), s.stocks)
+		w.printf("  %s:  ₹%s  (%d stocks)\n", s.fy, FormatLakhs(math.Round(s.total)), s.stocks)
 	}
 
 	w.printf("\n  Does this match your records? [Y/n] → ")

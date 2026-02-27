@@ -125,6 +125,15 @@ func runScore(args []string) {
 
 	// Score
 	summary := scorer.Score(realized)
+
+	// Include unattributed F&O in overall alpha — it's real income earned
+	totalUnattribFnO := 0.0
+	for _, u := range unattributedFnO {
+		totalUnattribFnO += u.NetPnL
+	}
+	summary.TotalMyReturn += math.Round(totalUnattribFnO)
+	summary.NetAlpha += math.Round(totalUnattribFnO)
+
 	log.Printf("Win rate: %d%%, Net alpha: ₹%d", summary.WinRate, int(summary.NetAlpha))
 
 	// Write JSON

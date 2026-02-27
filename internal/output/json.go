@@ -59,11 +59,12 @@ type DividendFYJSON struct {
 
 // WarningJSON represents an unmatched sell in the output.
 type WarningJSON struct {
-	Ticker    string `json:"ticker"`
-	SellDate  string `json:"sell_date"`
-	Unmatched int    `json:"unmatched_shares"`
-	Total     int    `json:"total_shares"`
-	Message   string `json:"message"`
+	Ticker    string  `json:"ticker"`
+	SellDate  string  `json:"sell_date"`
+	SellPrice float64 `json:"sell_price,omitempty"`
+	Unmatched int     `json:"unmatched_shares"`
+	Total     int     `json:"total_shares"`
+	Message   string  `json:"message"`
 }
 
 // TradeJSON is the JSON representation of a realized trade.
@@ -171,6 +172,7 @@ func WriteJSON(path string, trades []matcher.RealizedTrade, open []matcher.OpenP
 		sc.Warnings[i] = WarningJSON{
 			Ticker:    w.Symbol,
 			SellDate:  w.SellDate,
+			SellPrice: roundTo2(w.SellPrice),
 			Unmatched: int(w.Unmatched),
 			Total:     int(w.Total),
 			Message:   w.Message,
