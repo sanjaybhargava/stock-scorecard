@@ -108,6 +108,17 @@ stock-scorecard/
 │   └── public/scorecard.json
 ├── ui-cockpit/                  # React cockpit UI (Vite + Tailwind)
 │   ├── src/App.jsx              # Cockpit dashboard (pass/fail/deep-dive)
+│   ├── src/components/
+│   │   ├── StockDeepDive.jsx    # Deep-dive container for failed stocks
+│   │   ├── TestResults.jsx      # Pass/fail test result cards
+│   │   ├── PortfolioSummary.jsx # Portfolio overview
+│   │   └── cards/
+│   │       ├── RedeploymentPlan.jsx  # 3-bucket redeployment (Nifty/Conviction/Momentum)
+│   │       ├── TerminalValue.jsx     # Terminal value comparison with 3-bucket allocation
+│   │       ├── PhasePerformance.jsx  # Bull/Bear/Sideways phase returns
+│   │       ├── MaximumPain.jsx       # Maximum drawdown analysis
+│   │       ├── CoveredCall.jsx       # Covered call income potential
+│   │       └── FutureProspects.jsx   # AI-generated future outlook
 │   └── public/cockpit.json
 ├── build-release.sh             # Cross-compile for Mac ARM/Intel + Windows
 ├── deploy.sh                    # Build + deploy scorecard to gh-pages
@@ -333,8 +344,35 @@ go test ./...
 | Sanjay | BT2632 / CI8364 | Equity + F&O, wife CI8364 |
 | MIL (Vimal Kapur) | ZY7393 | 452 realized, 39 unrealized tickers, transfer-ins from 2016 |
 
+## Cockpit Deep-Dive Cards
+
+Each failed stock gets a deep-dive with these cards:
+
+| Card | Purpose |
+|------|---------|
+| PhasePerformance | Stock vs Nifty returns across Bull/Bear/Sideways regimes |
+| MaximumPain | Worst drawdown analysis and recovery timeline |
+| RedeploymentPlan | Three-bucket redeployment model with interactive sliders |
+| TerminalValue | Terminal value: hold vs sell-and-redeploy comparison |
+| CoveredCall | Covered call income potential on retained shares |
+| FutureProspects | AI-generated business outlook and catalysts |
+
+### Three-Way Allocation Model
+
+Redeployment and terminal value cards use a two-step slider UX for three-bucket allocation:
+
+1. **Slider 1 — Passive vs Active:** 50–100% passive (default 80%), step 10
+2. **Slider 2 — Conviction vs Momentum:** 0–100% conviction within active (default 60%), step 10. Hidden when passive = 100%.
+
+At defaults (80/20 passive/active, 60/40 conviction/momentum):
+- **Nifty 500** (indigo `#6366f1`): 80% — broad market index, 16.2% CAGR
+- **High-Conviction** (amber `#d97706`): 12% — 3–5 year holds, 25% CAGR target
+- **Momentum** (teal `#0d9488`): 8% — AI-assisted themes, 6–18 month holds, 20% CAGR target
+
 ## Future Enhancements
 
+- High-conviction picks suggestion card (deep-dive)
+- Momentum picks suggestion card (deep-dive)
 - Brokerage/STT deduction
 - Auto-fetch MF NAVs from MFAPI
 - Multi-broker parsers (Groww, ICICI)

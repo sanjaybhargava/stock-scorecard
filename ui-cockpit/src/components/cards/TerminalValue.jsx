@@ -5,12 +5,16 @@ function compound(principal, cagr, years) {
   return principal * Math.pow(1 + cagr / 100, years);
 }
 
+const MOMENTUM_CAGR = 20;
+
 export default function TerminalValue({ stock }) {
-  const { totalShares, price, costPerShare, taxRate, niftyCagr, hcCagr, niftyPct, hcPct, years } = stock;
+  const { totalShares, price, costPerShare, taxRate, niftyCagr, hcCagr, years } = stock;
   const exemption = stock.ltcgExemption || 125000;
   const defaultSell = Math.round(totalShares * 0.25 / 100) * 100 || Math.round(totalShares * 0.25);
   const [sharesToSell, setSharesToSell] = useState(defaultSell);
   const [hulCagr, setHulCagr] = useState(12);
+  const [passivePct, setPassivePct] = useState(80);
+  const [convictionPct, setConvictionPct] = useState(60);
 
   const sharesRetained = totalShares - sharesToSell;
 
@@ -22,11 +26,22 @@ export default function TerminalValue({ stock }) {
   const tax = Math.round(taxableGain * taxRate / 100);
   const netProceeds = saleValue - tax;
 
-  const niftyAlloc = netProceeds * niftyPct / 100;
-  const hcAlloc = netProceeds * hcPct / 100;
+  // Three-bucket allocation
+  const activePct = 100 - passivePct;
+  const momentumOfActive = 100 - convictionPct;
+
+  const overallNiftyPct = passivePct;
+  const overallConvictionPct = activePct * convictionPct / 100;
+  const overallMomentumPct = activePct * momentumOfActive / 100;
+
+  const niftyAlloc = netProceeds * overallNiftyPct / 100;
+  const convictionAlloc = netProceeds * overallConvictionPct / 100;
+  const momentumAlloc = netProceeds * overallMomentumPct / 100;
+
   const niftyTerminal = compound(niftyAlloc, niftyCagr, years);
-  const hcTerminal = compound(hcAlloc, hcCagr, years);
-  const redeployTerminal = niftyTerminal + hcTerminal;
+  const convictionTerminal = compound(convictionAlloc, hcCagr, years);
+  const momentumTerminal = compound(momentumAlloc, MOMENTUM_CAGR, years);
+  const redeployTerminal = niftyTerminal + convictionTerminal + momentumTerminal;
 
   // HOLD side
   const retainedValue = sharesRetained * price;
@@ -49,6 +64,18 @@ export default function TerminalValue({ stock }) {
       break;
     }
   }
+
+  // Dynamic label for sell & redeploy box
+  const redeployLabel = (() => {
+    const parts = [];
+    parts.push(`${Math.round(overallNiftyPct)}% Nifty @${niftyCagr}%`);
+    if (overallConvictionPct > 0) parts.push(`${Math.round(overallConvictionPct)}% picks @${hcCagr}%`);
+    if (overallMomentumPct > 0) parts.push(`${Math.round(overallMomentumPct)}% momentum @${MOMENTUM_CAGR}%`);
+    return parts.join(" + ");
+  })();
+
+  // Dynamic DEPLOYABLE sub-label
+  const splitLabel = `${Math.round(overallNiftyPct)}/${Math.round(overallConvictionPct)}/${Math.round(overallMomentumPct)} split`;
 
   return (
     <div style={{ background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0", overflow: "hidden" }}>
@@ -99,6 +126,36 @@ export default function TerminalValue({ stock }) {
         </div>
       </div>
 
+      {/* Slider 3: Passive vs Active */}
+      <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <span style={{ fontSize: 13, fontWeight: 500, color: "#475569" }}>How much goes to the index?</span>
+          <span style={{ fontSize: 13, fontWeight: 600, color: "#6366f1", fontFamily: "'JetBrains Mono', monospace" }}>
+            Passive {passivePct}% / Active {activePct}%
+          </span>
+        </div>
+        <input type="range" min={50} max={100} step={10} value={passivePct}
+          onChange={e => setPassivePct(Number(e.target.value))}
+          style={{ width: "100%", accentColor: "#6366f1" }}
+        />
+      </div>
+
+      {/* Slider 4: Conviction vs Momentum (only when active > 0) */}
+      {activePct > 0 && (
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: "#475569" }}>Within your active bet — patient capital vs tactical?</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#d97706", fontFamily: "'JetBrains Mono', monospace" }}>
+              Conviction {convictionPct}% / Momentum {momentumOfActive}%
+            </span>
+          </div>
+          <input type="range" min={0} max={100} step={10} value={convictionPct}
+            onChange={e => setConvictionPct(Number(e.target.value))}
+            style={{ width: "100%", accentColor: "#d97706" }}
+          />
+        </div>
+      )}
+
       {/* Hero: Terminal value comparison */}
       {sharesToSell > 0 && (
         <div style={{ padding: "20px" }}>
@@ -134,7 +191,7 @@ export default function TerminalValue({ stock }) {
               <div style={{ fontSize: 18, fontWeight: 700, color: "#6366f1", fontFamily: "'JetBrains Mono', monospace" }}>
                 {fmt(netProceeds)}
               </div>
-              <div style={{ fontSize: 11, color: "#94a3b8" }}>{niftyPct}/{hcPct} split</div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>{splitLabel}</div>
             </div>
           </div>
 
@@ -171,7 +228,7 @@ export default function TerminalValue({ stock }) {
                 {fmtCr(sellAndRedeployTerminal)}
               </div>
               <div style={{ fontSize: 12, color: "#94a3b8" }}>
-                {niftyPct}% Nifty @{niftyCagr}% + {hcPct}% picks @{hcCagr}%
+                {redeployLabel}
                 {sharesRetained > 0 && ` + ${sharesRetained.toLocaleString()} ${stock.ticker}`}
               </div>
             </div>

@@ -35,15 +35,20 @@ function FlowRow({ label, amount, sub, color, bold, border }) {
 
 export default function RedeploymentPlan({ stock }) {
   const [exitPct, setExitPct] = useState(100);
-  const [niftyPct, setNiftyPct] = useState(80);
-  const [numStocks, setNumStocks] = useState(10);
-  const [targetCagr, setTargetCagr] = useState(25);
+  const [passivePct, setPassivePct] = useState(80);
+  const [convictionPct, setConvictionPct] = useState(60);
 
   const plan = computePlan(stock, exitPct);
-  const highConvPct = 100 - niftyPct;
-  const niftyAmount = Math.round(plan.netProceeds * niftyPct / 100);
-  const highConvAmount = Math.round(plan.netProceeds * highConvPct / 100);
-  const perStock = Math.round(highConvAmount / numStocks);
+  const activePct = 100 - passivePct;
+  const momentumOfActive = 100 - convictionPct;
+
+  const overallNiftyPct = passivePct;
+  const overallConvictionPct = activePct * convictionPct / 100;
+  const overallMomentumPct = activePct * momentumOfActive / 100;
+
+  const niftyAmount = Math.round(plan.netProceeds * overallNiftyPct / 100);
+  const convictionAmount = Math.round(plan.netProceeds * overallConvictionPct / 100);
+  const momentumAmount = Math.round(plan.netProceeds * overallMomentumPct / 100);
   const sharesRemaining = stock.shares - plan.sharesExiting;
 
   return (
@@ -92,27 +97,53 @@ export default function RedeploymentPlan({ stock }) {
 
       {/* Allocation split */}
       <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", letterSpacing: 0.3, textTransform: "uppercase" }}>Your allocation</span>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, color: "#64748b" }}>
-            <span>Nifty</span>
-            <input type="range" min={50} max={100} step={10} value={niftyPct}
-              onChange={e => setNiftyPct(Number(e.target.value))}
-              style={{ width: 80, accentColor: "#6366f1" }}
-            />
-            <span style={{ fontWeight: 600, color: "#6366f1" }}>{niftyPct}/{highConvPct}</span>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 12 }}>
+          Your allocation
+        </div>
+
+        {/* Slider 1: Passive vs Active */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <span style={{ fontSize: 13, fontWeight: 500, color: "#475569" }}>How much goes to the index?</span>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#6366f1", fontFamily: "'JetBrains Mono', monospace" }}>
+              Passive {passivePct}% / Active {activePct}%
+            </span>
           </div>
+          <input type="range" min={50} max={100} step={10} value={passivePct}
+            onChange={e => setPassivePct(Number(e.target.value))}
+            style={{ width: "100%", accentColor: "#6366f1" }}
+          />
         </div>
 
+        {/* Slider 2: Conviction vs Momentum (only when active > 0) */}
+        {activePct > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "#475569" }}>Within your active bet — patient capital vs tactical?</span>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#d97706", fontFamily: "'JetBrains Mono', monospace" }}>
+                Conviction {convictionPct}% / Momentum {momentumOfActive}%
+              </span>
+            </div>
+            <input type="range" min={0} max={100} step={10} value={convictionPct}
+              onChange={e => setConvictionPct(Number(e.target.value))}
+              style={{ width: "100%", accentColor: "#d97706" }}
+            />
+          </div>
+        )}
+
+        {/* Progress bar: three segments */}
         <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginBottom: 16 }}>
-          <div style={{ width: `${niftyPct}%`, background: "#6366f1", transition: "width 0.2s" }} />
-          <div style={{ width: `${highConvPct}%`, background: "#f59e0b", transition: "width 0.2s" }} />
+          <div style={{ width: `${overallNiftyPct}%`, background: "#6366f1", transition: "width 0.2s" }} />
+          <div style={{ width: `${overallConvictionPct}%`, background: "#d97706", transition: "width 0.2s" }} />
+          <div style={{ width: `${overallMomentumPct}%`, background: "#0d9488", transition: "width 0.2s" }} />
         </div>
 
+        {/* Three allocation boxes */}
         <div style={{ display: "flex", gap: 12 }}>
+          {/* Nifty 500 */}
           <div style={{ flex: 1, padding: "14px 16px", borderRadius: 10, background: "rgba(99,102,241,0.04)", border: "1px solid rgba(99,102,241,0.15)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#6366f1" }}>{niftyPct}%</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#6366f1" }}>{Math.round(overallNiftyPct)}%</span>
               <span style={{ fontSize: 16, fontWeight: 700, color: "#6366f1", fontFamily: "'JetBrains Mono', monospace" }}>{fmt(niftyAmount)}</span>
             </div>
             <div style={{ fontSize: 14, fontWeight: 600, color: "#1e293b", marginBottom: 4 }}>Nifty 500 Index</div>
@@ -121,41 +152,106 @@ export default function RedeploymentPlan({ stock }) {
             </div>
           </div>
 
-          <div style={{ flex: 1, padding: "14px 16px", borderRadius: 10, background: "rgba(245,158,11,0.04)", border: "1px solid rgba(245,158,11,0.15)" }}>
+          {/* High-Conviction */}
+          <div style={{ flex: 1, padding: "14px 16px", borderRadius: 10, background: "rgba(217,119,6,0.04)", border: "1px solid rgba(217,119,6,0.15)" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#d97706" }}>{highConvPct}%</span>
-              <span style={{ fontSize: 16, fontWeight: 700, color: "#d97706", fontFamily: "'JetBrains Mono', monospace" }}>{fmt(highConvAmount)}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#d97706" }}>{Math.round(overallConvictionPct)}%</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: "#d97706", fontFamily: "'JetBrains Mono', monospace" }}>{fmt(convictionAmount)}</span>
             </div>
             <div style={{ fontSize: 14, fontWeight: 600, color: "#1e293b", marginBottom: 4 }}>High-Conviction Picks</div>
             <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
-              {numStocks} stocks, ~{fmt(perStock)} each, targeting {targetCagr}% CAGR.
+              3–5 year holds, 3% test discipline. 25% CAGR target.
+            </div>
+          </div>
+
+          {/* Momentum */}
+          <div style={{ flex: 1, padding: "14px 16px", borderRadius: 10, background: "rgba(13,148,136,0.04)", border: "1px solid rgba(13,148,136,0.15)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "#0d9488" }}>{Math.round(overallMomentumPct)}%</span>
+              <span style={{ fontSize: 16, fontWeight: 700, color: "#0d9488", fontFamily: "'JetBrains Mono', monospace" }}>{fmt(momentumAmount)}</span>
+            </div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#1e293b", marginBottom: 4 }}>Momentum</div>
+            <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+              AI-assisted macro themes · 6–18 month holds. 20% CAGR target.
             </div>
           </div>
         </div>
       </div>
 
-      {/* Risk acknowledgment */}
-      <div style={{ padding: "16px 20px", background: "rgba(245,158,11,0.03)" }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 10 }}>Risk on the {highConvPct}%</div>
-        <div style={{ display: "flex", gap: 1, borderRadius: 8, overflow: "hidden", border: "1px solid #e2e8f0" }}>
-          <div style={{ flex: 1, padding: "10px 12px", textAlign: "center", background: "rgba(239,68,68,0.04)" }}>
-            <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Downside</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#dc2626" }}>5%</div>
-            <div style={{ fontSize: 11, color: "#94a3b8" }}>or loss</div>
+      {/* Risk profile */}
+      <div style={{ padding: "16px 20px", background: "rgba(148,163,184,0.02)" }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 10 }}>
+          Risk profile across your allocation
+        </div>
+        <div style={{ display: "flex", gap: 12 }}>
+          {/* Nifty 500 risk */}
+          <div style={{ flex: 1, borderRadius: 8, overflow: "hidden", border: "1px solid rgba(99,102,241,0.15)", background: "rgba(99,102,241,0.04)" }}>
+            <div style={{ padding: "8px 12px", textAlign: "center", borderBottom: "1px solid rgba(99,102,241,0.1)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#6366f1", textTransform: "uppercase" }}>Nifty 500</div>
+            </div>
+            <div style={{ padding: "10px 12px", textAlign: "center", borderBottom: "1px solid rgba(99,102,241,0.08)" }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Downside</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#6366f1" }}>10%</div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>CAGR</div>
+            </div>
+            <div style={{ padding: "10px 12px", textAlign: "center", borderBottom: "1px solid rgba(99,102,241,0.08)" }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Target</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#6366f1" }}>16.2%</div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>CAGR</div>
+            </div>
+            <div style={{ padding: "10px 12px", textAlign: "center" }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Upside</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#6366f1" }}>22%+</div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>CAGR</div>
+            </div>
           </div>
-          <div style={{ flex: 1, padding: "10px 12px", textAlign: "center", background: "rgba(245,158,11,0.04)" }}>
-            <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Target</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#d97706" }}>{targetCagr}%</div>
-            <div style={{ fontSize: 11, color: "#94a3b8" }}>CAGR</div>
+
+          {/* High-Conviction risk */}
+          <div style={{ flex: 1, borderRadius: 8, overflow: "hidden", border: "1px solid rgba(217,119,6,0.15)", background: "rgba(217,119,6,0.04)" }}>
+            <div style={{ padding: "8px 12px", textAlign: "center", borderBottom: "1px solid rgba(217,119,6,0.1)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#d97706", textTransform: "uppercase" }}>High-Conviction</div>
+            </div>
+            <div style={{ padding: "10px 12px", textAlign: "center", borderBottom: "1px solid rgba(217,119,6,0.08)" }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Downside</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#d97706" }}>5%</div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>CAGR</div>
+            </div>
+            <div style={{ padding: "10px 12px", textAlign: "center", borderBottom: "1px solid rgba(217,119,6,0.08)" }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Target</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#d97706" }}>25%</div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>CAGR</div>
+            </div>
+            <div style={{ padding: "10px 12px", textAlign: "center" }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Upside</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#d97706" }}>40%+</div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>CAGR</div>
+            </div>
           </div>
-          <div style={{ flex: 1, padding: "10px 12px", textAlign: "center", background: "rgba(34,197,94,0.04)" }}>
-            <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Upside</div>
-            <div style={{ fontSize: 16, fontWeight: 700, color: "#16a34a" }}>40%+</div>
-            <div style={{ fontSize: 11, color: "#94a3b8" }}>CAGR</div>
+
+          {/* Momentum risk */}
+          <div style={{ flex: 1, borderRadius: 8, overflow: "hidden", border: "1px solid rgba(13,148,136,0.15)", background: "rgba(13,148,136,0.04)" }}>
+            <div style={{ padding: "8px 12px", textAlign: "center", borderBottom: "1px solid rgba(13,148,136,0.1)" }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: "#0d9488", textTransform: "uppercase" }}>Momentum</div>
+            </div>
+            <div style={{ padding: "10px 12px", textAlign: "center", borderBottom: "1px solid rgba(13,148,136,0.08)" }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Downside</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#dc2626" }}>−10%</div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>CAGR</div>
+            </div>
+            <div style={{ padding: "10px 12px", textAlign: "center", borderBottom: "1px solid rgba(13,148,136,0.08)" }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Target</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#0d9488" }}>20%</div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>CAGR</div>
+            </div>
+            <div style={{ padding: "10px 12px", textAlign: "center" }}>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginBottom: 2 }}>Upside</div>
+              <div style={{ fontSize: 16, fontWeight: 700, color: "#0d9488" }}>35%+</div>
+              <div style={{ fontSize: 11, color: "#94a3b8" }}>CAGR</div>
+            </div>
           </div>
         </div>
         <p style={{ fontSize: 12, color: "#64748b", margin: "10px 0 0", lineHeight: 1.5, textAlign: "center" }}>
-          High-conviction picks carry concentration risk. Sized at {fmt(perStock)} per stock to limit damage from any single miss.
+          Your {Math.round(overallNiftyPct)}% index core delivers steady compounding. The {Math.round(overallConvictionPct)}% conviction and {Math.round(overallMomentumPct)}% momentum bets add return potential with managed risk.
         </p>
       </div>
     </div>
