@@ -113,6 +113,7 @@ stock-scorecard/
 │   │   ├── TestResults.jsx      # Pass/fail test result cards
 │   │   ├── PortfolioSummary.jsx # Portfolio overview
 │   │   └── cards/
+│   │       ├── ConvictionPicks.jsx   # High-conviction picks (11 stocks, slider, GTT matrix)
 │   │       ├── RedeploymentPlan.jsx  # 3-bucket redeployment (Nifty/Conviction/Momentum)
 │   │       ├── TerminalValue.jsx     # Terminal value comparison with 3-bucket allocation
 │   │       ├── PhasePerformance.jsx  # Bull/Bear/Sideways phase returns
@@ -120,6 +121,8 @@ stock-scorecard/
 │   │       ├── CoveredCall.jsx       # Covered call income potential
 │   │       └── FutureProspects.jsx   # AI-generated future outlook
 │   └── public/cockpit.json
+├── docs/
+│   └── conviction-picks-reference.pdf  # Source data for 11 conviction picks
 ├── build-release.sh             # Cross-compile for Mac ARM/Intel + Windows
 ├── deploy.sh                    # Build + deploy scorecard to gh-pages
 ├── deploy-cockpit.sh            # Build + deploy cockpit to gh-pages
@@ -344,6 +347,16 @@ go test ./...
 | Sanjay | BT2632 / CI8364 | Equity + F&O, wife CI8364 |
 | MIL (Vimal Kapur) | ZY7393 | 452 realized, 39 unrealized tickers, transfer-ins from 2016 |
 
+## Cockpit Navigation
+
+Layer 1 (PortfolioSummary) has three navigation buttons at the bottom of the hero card:
+
+| Button | Layer | Status |
+|--------|-------|--------|
+| **3% Test** | 2 → TestResults | Active (indigo) |
+| **Conviction Picks** | 4 → ConvictionPicks | Active (amber) |
+| **Momentum Picks** | — | Disabled ("Coming soon") |
+
 ## Cockpit Deep-Dive Cards
 
 Each failed stock gets a deep-dive with these cards:
@@ -356,6 +369,30 @@ Each failed stock gets a deep-dive with these cards:
 | TerminalValue | Terminal value: hold vs sell-and-redeploy comparison |
 | CoveredCall | Covered call income potential on retained shares |
 | FutureProspects | AI-generated business outlook and catalysts |
+
+## Conviction Picks Card
+
+11 high-conviction stock picks (hardcoded in `ConvictionPicks.jsx`, source: `docs/conviction-picks-reference.pdf`):
+
+| # | Stock | CEO | Status | GTT Price | Strategy | Role |
+|---|-------|-----|--------|-----------|----------|------|
+| 1 | KFin Tech | Sreekanth Nadella | Active | — | Core | Financial Infrastructure / SaaS |
+| 2 | IDFC First | V. Vaidyanathan | Active | — | Opportunistic | Banking Value (Recovery Play) |
+| 3 | Amara Raja | Jayadev Galla | Active | — | Core | Energy Transition / Gigafactory |
+| 4 | Syrma SGS | J.S. Gujral | Active | — | Core | Defense & Industrial Electronics |
+| 5 | Solar Inds. | Manish Nuwal | GTT | ₹11,800 | Structural | Ammunition & Rocket Propellants |
+| 6 | Zen Tech | Ashok Atluri | GTT | ₹1,180 | Structural | Drone Warfare & Anti-Drone Tech |
+| 7 | PTC Inds. | Sachin Agarwal | GTT | ₹17,200 | Moat | Strategic Titanium Castings |
+| 8 | Netweb Tech | Sanjay Lodha | GTT | ₹3,000 | Tech | AI Infrastructure & Servers |
+| 9 | Gravita | Yogesh Malhotra | GTT | ₹1,500 | Resilience | Circular Economy (Metal Recycling) |
+| 10 | Apar Inds. | Kushal Desai | GTT | ₹9,200 | Infra | Global Power Transmission |
+| 11 | KEI Inds. | Anil Gupta | GTT | ₹4,180 | Infra | Urban Underground Cables |
+
+- **MAX_REDEPLOYABLE:** ₹7,43,18,246 (₹7.43 Cr)
+- **Conviction slice:** 12% of slider value (from three-way allocation model)
+- **Per stock:** conviction slice / 11
+- **Active picks:** deploy at market price, no share count
+- **GTT picks:** deploy at GTT limit price, shares = floor(amount / gttPrice)
 
 ### Three-Way Allocation Model
 
@@ -371,8 +408,8 @@ At defaults (80/20 passive/active, 60/40 conviction/momentum):
 
 ## Future Enhancements
 
-- High-conviction picks suggestion card (deep-dive)
-- Momentum picks suggestion card (deep-dive)
+- ~~High-conviction picks suggestion card~~ ✓ Implemented (ConvictionPicks.jsx)
+- Momentum picks suggestion card (cockpit layer — placeholder button exists)
 - Brokerage/STT deduction
 - Auto-fetch MF NAVs from MFAPI
 - Multi-broker parsers (Groww, ICICI)

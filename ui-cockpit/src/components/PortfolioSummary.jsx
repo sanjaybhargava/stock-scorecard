@@ -35,7 +35,7 @@ function ClassCard({ label, sublabel, invested, current, count, color, borderCol
   );
 }
 
-export default function PortfolioSummary({ data, onNavigate }) {
+export default function PortfolioSummary({ data, onNavigate3pct, onNavigateConviction }) {
   const { portfolio, stocks, summary } = data;
   const bc = portfolio.by_class;
 
@@ -106,14 +106,10 @@ export default function PortfolioSummary({ data, onNavigate }) {
 
       {/* Hero: active bets summary */}
       <div
-        onClick={onNavigate}
         style={{
-          padding: "20px 24px", borderRadius: 12, cursor: "pointer",
+          padding: "20px 24px", borderRadius: 12,
           background: "#fff", border: "1px solid #e2e8f0",
-          transition: "box-shadow 0.2s",
         }}
-        onMouseEnter={(e) => e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.08)"}
-        onMouseLeave={(e) => e.currentTarget.style.boxShadow = "none"}
       >
         <div style={{ fontSize: 12, fontWeight: 600, color: "#94a3b8", letterSpacing: 0.3, textTransform: "uppercase", marginBottom: 14 }}>
           ACTIVE BETS
@@ -152,10 +148,45 @@ export default function PortfolioSummary({ data, onNavigate }) {
           </span>
         </div>
 
-        <div style={{ textAlign: "center", marginTop: 14 }}>
-          <span style={{ fontSize: 13, color: "#6366f1", fontWeight: 500, cursor: "pointer" }}>
-            See detailed results →
-          </span>
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button
+            onClick={onNavigate3pct}
+            style={{
+              flex: 1, padding: "10px 0", borderRadius: 8, cursor: "pointer",
+              background: "#6366f1", color: "#fff", border: "none",
+              fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+              transition: "opacity 0.15s",
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.opacity = "0.9"}
+            onMouseLeave={(e) => e.currentTarget.style.opacity = "1"}
+          >
+            3% Test
+          </button>
+          <button
+            onClick={onNavigateConviction}
+            style={{
+              flex: 1, padding: "10px 0", borderRadius: 8, cursor: "pointer",
+              background: "#d97706", color: "#fff", border: "none",
+              fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+              transition: "opacity 0.15s",
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.opacity = "0.9"}
+            onMouseLeave={(e) => e.currentTarget.style.opacity = "1"}
+          >
+            Conviction Picks
+          </button>
+          <button
+            disabled
+            style={{
+              flex: 1, padding: "10px 0", borderRadius: 8,
+              background: "#f1f5f9", color: "#94a3b8", border: "none",
+              fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
+              cursor: "not-allowed",
+            }}
+          >
+            <div>Momentum Picks</div>
+            <div style={{ fontSize: 10, fontWeight: 400, marginTop: 1 }}>Coming soon</div>
+          </button>
         </div>
       </div>
     </div>

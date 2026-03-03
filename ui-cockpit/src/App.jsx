@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import PortfolioSummary from "./components/PortfolioSummary.jsx";
 import TestResults from "./components/TestResults.jsx";
 import StockDeepDive from "./components/StockDeepDive.jsx";
+import ConvictionPicks from "./components/cards/ConvictionPicks.jsx";
 
 export default function App() {
   const [data, setData] = useState(null);
@@ -57,7 +58,11 @@ export default function App() {
     <div ref={topRef} style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: "'DM Sans', sans-serif", padding: "32px 20px" }}>
       <div style={{ maxWidth: 700, margin: "0 auto" }}>
         {layer === 1 && (
-          <PortfolioSummary data={data} onNavigate={() => navigate(2)} />
+          <PortfolioSummary
+            data={data}
+            onNavigate3pct={() => navigate(2)}
+            onNavigateConviction={() => navigate(4)}
+          />
         )}
         {layer === 2 && (
           <TestResults
@@ -72,6 +77,9 @@ export default function App() {
             data={data}
             onBack={() => navigate(2)}
           />
+        )}
+        {layer === 4 && (
+          <ConvictionPicks onBack={() => navigate(1)} />
         )}
       </div>
     </div>
