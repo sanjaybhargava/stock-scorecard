@@ -3,6 +3,7 @@ import PortfolioSummary from "./components/PortfolioSummary.jsx";
 import TestResults from "./components/TestResults.jsx";
 import StockDeepDive from "./components/StockDeepDive.jsx";
 import ConvictionPicks from "./components/cards/ConvictionPicks.jsx";
+import MomentumPicks from "./components/cards/MomentumPicks.jsx";
 
 export default function App() {
   const [data, setData] = useState(null);
@@ -62,6 +63,7 @@ export default function App() {
             data={data}
             onNavigate3pct={() => navigate(2)}
             onNavigateConviction={() => navigate(4)}
+            onNavigateMomentum={() => navigate(5)}
           />
         )}
         {layer === 2 && (
@@ -80,6 +82,9 @@ export default function App() {
         )}
         {layer === 4 && (
           <ConvictionPicks onBack={() => navigate(1)} />
+        )}
+        {layer === 5 && (
+          <MomentumPicks onBack={() => navigate(1)} />
         )}
       </div>
     </div>

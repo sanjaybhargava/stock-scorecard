@@ -114,6 +114,7 @@ stock-scorecard/
 │   │   ├── PortfolioSummary.jsx # Portfolio overview
 │   │   └── cards/
 │   │       ├── ConvictionPicks.jsx   # High-conviction picks (11 stocks, slider, GTT matrix)
+│   │       ├── MomentumPicks.jsx    # Momentum picks (3 picks, monthly review, slider)
 │   │       ├── RedeploymentPlan.jsx  # 3-bucket redeployment (Nifty/Conviction/Momentum)
 │   │       ├── TerminalValue.jsx     # Terminal value comparison with 3-bucket allocation
 │   │       ├── PhasePerformance.jsx  # Bull/Bear/Sideways phase returns
@@ -355,7 +356,7 @@ Layer 1 (PortfolioSummary) has three navigation buttons at the bottom of the her
 |--------|-------|--------|
 | **3% Test** | 2 → TestResults | Active (indigo) |
 | **Conviction Picks** | 4 → ConvictionPicks | Active (amber) |
-| **Momentum Picks** | — | Disabled ("Coming soon") |
+| **Momentum Picks** | 5 → MomentumPicks | Active (teal) |
 
 ## Cockpit Deep-Dive Cards
 
@@ -406,10 +407,28 @@ At defaults (80/20 passive/active, 60/40 conviction/momentum):
 - **High-Conviction** (amber `#d97706`): 12% — 3–5 year holds, 25% CAGR target
 - **Momentum** (teal `#0d9488`): 8% — AI-assisted themes, 6–18 month holds, 20% CAGR target
 
+## Momentum Picks Card
+
+3 momentum picks reviewed monthly (hardcoded in `MomentumPicks.jsx`):
+
+| # | Ticker | Name | Type | Entry | Exit GTT | Rationale |
+|---|--------|------|------|-------|----------|-----------|
+| 1 | SILVERBEES | Nippon India Silver BeES | ETF | ₹96 | ₹86 | Silver outperforming gold; industrial + monetary demand tailwind |
+| 2 | METALIETF | ICICI Pru Nifty Metal ETF | ETF | ₹12,250 | ₹11,025 | Metals leading risk-on rotation; China stimulus + infra capex |
+| 3 | MAZDOCK | Mazagon Dock Shipbuilders | Stock | ₹2,235 | ₹2,012 | Defence secular theme; order book visibility 3+ years |
+
+- **Slider:** 0–₹1 Cr, step ₹1L, default ₹1 Cr, teal `#0d9488` accent
+- **Per pick:** slider value / 3
+- **Qty:** floor(perPick / entry price)
+- **Exit discipline:** 10% trailing stop from entry, placed as GTT sell order on day one
+- **Methodology:** Rules-based momentum screen — 6-month return, exclude blow-off top 5%, above 200-DMA, rank by risk-adjusted trend score
+- **Disclaimer:** Always visible — "Picked by AI, do your own research, high risk"
+- **Review cadence:** Monthly (March 2026 is first review)
+
 ## Future Enhancements
 
 - ~~High-conviction picks suggestion card~~ ✓ Implemented (ConvictionPicks.jsx)
-- Momentum picks suggestion card (cockpit layer — placeholder button exists)
+- ~~Momentum picks suggestion card~~ ✓ Implemented (MomentumPicks.jsx)
 - Brokerage/STT deduction
 - Auto-fetch MF NAVs from MFAPI
 - Multi-broker parsers (Groww, ICICI)

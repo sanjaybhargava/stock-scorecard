@@ -35,7 +35,7 @@ function ClassCard({ label, sublabel, invested, current, count, color, borderCol
   );
 }
 
-export default function PortfolioSummary({ data, onNavigate3pct, onNavigateConviction }) {
+export default function PortfolioSummary({ data, onNavigate3pct, onNavigateConviction, onNavigateMomentum }) {
   const { portfolio, stocks, summary } = data;
   const bc = portfolio.by_class;
 
@@ -176,16 +176,17 @@ export default function PortfolioSummary({ data, onNavigate3pct, onNavigateConvi
             Conviction Picks
           </button>
           <button
-            disabled
+            onClick={onNavigateMomentum}
             style={{
-              flex: 1, padding: "10px 0", borderRadius: 8,
-              background: "#f1f5f9", color: "#94a3b8", border: "none",
+              flex: 1, padding: "10px 0", borderRadius: 8, cursor: "pointer",
+              background: "#0d9488", color: "#fff", border: "none",
               fontSize: 13, fontWeight: 600, fontFamily: "'DM Sans', sans-serif",
-              cursor: "not-allowed",
+              transition: "opacity 0.15s",
             }}
+            onMouseEnter={(e) => e.currentTarget.style.opacity = "0.9"}
+            onMouseLeave={(e) => e.currentTarget.style.opacity = "1"}
           >
-            <div>Momentum Picks</div>
-            <div style={{ fontSize: 10, fontWeight: 400, marginTop: 1 }}>Coming soon</div>
+            Momentum Picks
           </button>
         </div>
       </div>
