@@ -232,7 +232,11 @@ export default function StockScorecard() {
   const [error, setError] = useState(null);
 
   useEffect(() => {
-    fetch(import.meta.env.BASE_URL + "scorecard.json")
+    // Support ?client=DUA527 → loads scorecard_DUA527.json
+    const params = new URLSearchParams(window.location.search);
+    const client = params.get("client");
+    const jsonFile = client ? `scorecard_${client}.json` : "scorecard.json";
+    fetch(import.meta.env.BASE_URL + jsonFile)
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
       .then(setRawData)
       .catch(e => setError(e.message));

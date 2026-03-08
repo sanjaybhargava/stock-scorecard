@@ -32,6 +32,11 @@ func TestExtract(t *testing.T) {
 			want:      "AB5678",
 		},
 		{
+			name:      "three-letter prefix client",
+			filenames: []string{"DUA527_EQ_20240101_20241231.csv", "DUA527_FO_20240101_20241231.csv"},
+			want:      "DUA527",
+		},
+		{
 			name:      "mixed with non-matching files",
 			filenames: []string{"BT9999_20200101_20201231.csv", "NIFTY500_TRI_Indexed.csv", "dividends.csv"},
 			want:      "BT9999",

@@ -52,6 +52,24 @@ var symbolRe = regexp.MustCompile(`^([A-Z][A-Z&-]*[A-Z])\d{2}[A-Z]{3}\d+(?:\.\d+
 
 const fnoHeader = "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time,expiry_date"
 
+// requiredFnOColumns are the columns we actually use from the F&O tradebook CSV.
+var requiredFnOColumns = []string{"symbol", "trade_date", "trade_type", "quantity", "price", "trade_id", "order_id", "expiry_date"}
+
+// buildColumnIndex maps column names (lowercased, trimmed) to their positions.
+// Returns nil if any required column is missing.
+func buildColumnIndex(header []string, required []string) map[string]int {
+	idx := make(map[string]int, len(header))
+	for i, col := range header {
+		idx[strings.ToLower(strings.TrimSpace(col))] = i
+	}
+	for _, req := range required {
+		if _, ok := idx[req]; !ok {
+			return nil
+		}
+	}
+	return idx
+}
+
 // ParseDirectory reads all *.csv files from dir, identifies F&O tradebooks by
 // header validation, deduplicates by trade_id, consolidates fills, and returns
 // sorted FnOTrades. Returns nil, nil if no F&O tradebooks are found.
@@ -142,7 +160,8 @@ func parseFnOFile(path string, seenTradeIDs map[string]bool, fnoRenames map[stri
 	if err != nil {
 		return nil, fmt.Errorf("read header %s: %w", path, err)
 	}
-	if strings.Join(header, ",") != fnoHeader {
+	col := buildColumnIndex(header, requiredFnOColumns)
+	if col == nil {
 		return nil, fmt.Errorf("not an F&O tradebook: %s (header: %s)", path, strings.Join(header, ","))
 	}
 
@@ -155,12 +174,12 @@ func parseFnOFile(path string, seenTradeIDs map[string]bool, fnoRenames map[stri
 		if err != nil {
 			return nil, fmt.Errorf("read row in %s: %w", path, err)
 		}
-		if len(record) < 14 {
+		if len(record) <= col["expiry_date"] {
 			continue
 		}
 
-		symbol := strings.TrimSpace(record[0])
-		tradeID := strings.TrimSpace(record[10])
+		symbol := strings.TrimSpace(record[col["symbol"]])
+		tradeID := strings.TrimSpace(record[col["trade_id"]])
 		dedupKey := symbol + "|" + tradeID
 		if seenTradeIDs[dedupKey] {
 			continue
@@ -178,24 +197,24 @@ func parseFnOFile(path string, seenTradeIDs map[string]bool, fnoRenames map[stri
 			underlying = renamed
 		}
 
-		tradeDate, err := time.Parse("2006-01-02", strings.TrimSpace(record[2]))
+		tradeDate, err := time.Parse("2006-01-02", strings.TrimSpace(record[col["trade_date"]]))
 		if err != nil {
-			return nil, fmt.Errorf("parse trade_date %q in %s: %w", record[2], path, err)
+			return nil, fmt.Errorf("parse trade_date %q in %s: %w", record[col["trade_date"]], path, err)
 		}
 
-		expiryDate, err := time.Parse("2006-01-02", strings.TrimSpace(record[13]))
+		expiryDate, err := time.Parse("2006-01-02", strings.TrimSpace(record[col["expiry_date"]]))
 		if err != nil {
-			return nil, fmt.Errorf("parse expiry_date %q in %s: %w", record[13], path, err)
+			return nil, fmt.Errorf("parse expiry_date %q in %s: %w", record[col["expiry_date"]], path, err)
 		}
 
-		qty, err := strconv.ParseFloat(strings.TrimSpace(record[8]), 64)
+		qty, err := strconv.ParseFloat(strings.TrimSpace(record[col["quantity"]]), 64)
 		if err != nil {
-			return nil, fmt.Errorf("parse quantity %q in %s: %w", record[8], path, err)
+			return nil, fmt.Errorf("parse quantity %q in %s: %w", record[col["quantity"]], path, err)
 		}
 
-		price, err := strconv.ParseFloat(strings.TrimSpace(record[9]), 64)
+		price, err := strconv.ParseFloat(strings.TrimSpace(record[col["price"]]), 64)
 		if err != nil {
-			return nil, fmt.Errorf("parse price %q in %s: %w", record[9], path, err)
+			return nil, fmt.Errorf("parse price %q in %s: %w", record[col["price"]], path, err)
 		}
 
 		trades = append(trades, rawFnOTrade{
@@ -204,11 +223,11 @@ func parseFnOFile(path string, seenTradeIDs map[string]bool, fnoRenames map[stri
 			optionType: optionType,
 			expiryDate: expiryDate,
 			tradeDate:  tradeDate,
-			tradeType:  strings.ToLower(strings.TrimSpace(record[6])),
+			tradeType:  strings.ToLower(strings.TrimSpace(record[col["trade_type"]])),
 			quantity:   qty,
 			price:      price,
 			tradeID:    tradeID,
-			orderID:    strings.TrimSpace(record[11]),
+			orderID:    strings.TrimSpace(record[col["order_id"]]),
 		})
 	}
 

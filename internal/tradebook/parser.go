@@ -42,6 +42,26 @@ type ConsolidatedTrade struct {
 
 const zerodhaHeader = "symbol,isin,trade_date,exchange,segment,series,trade_type,auction,quantity,price,trade_id,order_id,order_execution_time"
 
+// requiredEQColumns are the columns we actually use from the tradebook CSV.
+// We check these exist (in any position) rather than requiring an exact header match,
+// so the parser survives Zerodha format changes (extra columns, reordering, spacing).
+var requiredEQColumns = []string{"symbol", "isin", "trade_date", "trade_type", "quantity", "price", "trade_id", "order_id"}
+
+// buildColumnIndex maps column names (lowercased, trimmed) to their positions.
+// Returns nil if any required column is missing.
+func buildColumnIndex(header []string, required []string) map[string]int {
+	idx := make(map[string]int, len(header))
+	for i, col := range header {
+		idx[strings.ToLower(strings.TrimSpace(col))] = i
+	}
+	for _, req := range required {
+		if _, ok := idx[req]; !ok {
+			return nil
+		}
+	}
+	return idx
+}
+
 // ParseDirectory reads all *.csv files from dir, deduplicates by trade_id,
 // consolidates fills, and returns sorted ConsolidatedTrades plus the detected
 // client ID (e.g. "2632" from BT2632_*.csv filenames).
@@ -133,8 +153,10 @@ func ParseDirectory(dir string, excludes []string, clientFilter ...string) ([]Co
 	return consolidated, detectedClientID, nil
 }
 
-// parseFile reads a single CSV file, validates the Zerodha header, deduplicates
-// by trade_id using the shared seenTradeIDs map, and returns parsed trades.
+// parseFile reads a single CSV file, validates it has the required Zerodha
+// columns, deduplicates by trade_id using the shared seenTradeIDs map, and
+// returns parsed trades. Uses flexible column lookup so it survives Zerodha
+// format changes (extra columns, reordering, spacing).
 func parseFile(path string, excludes map[string]bool, seenTradeIDs map[string]bool) ([]Trade, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -149,8 +171,13 @@ func parseFile(path string, excludes map[string]bool, seenTradeIDs map[string]bo
 	if err != nil {
 		return nil, fmt.Errorf("read header %s: %w", path, err)
 	}
-	if strings.Join(header, ",") != zerodhaHeader {
+	col := buildColumnIndex(header, requiredEQColumns)
+	if col == nil {
 		return nil, fmt.Errorf("not a Zerodha tradebook: %s", path)
+	}
+	// Reject F&O tradebooks — they have an expiry_date column that EQ files don't
+	if _, hasFnO := col["expiry_date"]; hasFnO {
+		return nil, fmt.Errorf("F&O tradebook (not equity): %s", path)
 	}
 
 	var trades []Trade
@@ -163,51 +190,48 @@ func parseFile(path string, excludes map[string]bool, seenTradeIDs map[string]bo
 			return nil, fmt.Errorf("read row in %s: %w", path, err)
 		}
 
-		// Columns: symbol(0), isin(1), trade_date(2), exchange(3), segment(4),
-		//          series(5), trade_type(6), auction(7), quantity(8), price(9),
-		//          trade_id(10), order_id(11), order_execution_time(12)
-		if len(record) < 13 {
+		if len(record) <= col["order_id"] {
 			continue
 		}
 
-		symbol := strings.TrimSpace(record[0])
+		symbol := strings.TrimSpace(record[col["symbol"]])
 		if excludes[strings.ToUpper(symbol)] {
 			continue
 		}
 
-		isin := strings.TrimSpace(record[1])
+		isin := strings.TrimSpace(record[col["isin"]])
 
-		tradeID := strings.TrimSpace(record[10])
+		tradeID := strings.TrimSpace(record[col["trade_id"]])
 		dedupKey := symbol + "|" + tradeID
 		if seenTradeIDs[dedupKey] {
 			continue // duplicate
 		}
 		seenTradeIDs[dedupKey] = true
 
-		tradeDate, err := time.Parse("2006-01-02", strings.TrimSpace(record[2]))
+		tradeDate, err := time.Parse("2006-01-02", strings.TrimSpace(record[col["trade_date"]]))
 		if err != nil {
-			return nil, fmt.Errorf("parse date %q in %s: %w", record[2], path, err)
+			return nil, fmt.Errorf("parse date %q in %s: %w", record[col["trade_date"]], path, err)
 		}
 
-		qty, err := strconv.ParseFloat(strings.TrimSpace(record[8]), 64)
+		qty, err := strconv.ParseFloat(strings.TrimSpace(record[col["quantity"]]), 64)
 		if err != nil {
-			return nil, fmt.Errorf("parse quantity %q in %s: %w", record[8], path, err)
+			return nil, fmt.Errorf("parse quantity %q in %s: %w", record[col["quantity"]], path, err)
 		}
 
-		price, err := strconv.ParseFloat(strings.TrimSpace(record[9]), 64)
+		price, err := strconv.ParseFloat(strings.TrimSpace(record[col["price"]]), 64)
 		if err != nil {
-			return nil, fmt.Errorf("parse price %q in %s: %w", record[9], path, err)
+			return nil, fmt.Errorf("parse price %q in %s: %w", record[col["price"]], path, err)
 		}
 
 		trades = append(trades, Trade{
 			Symbol:    symbol,
 			ISIN:      isin,
 			TradeDate: tradeDate,
-			TradeType: strings.ToLower(strings.TrimSpace(record[6])),
+			TradeType: strings.ToLower(strings.TrimSpace(record[col["trade_type"]])),
 			Quantity:  qty,
 			Price:     price,
 			TradeID:   tradeID,
-			OrderID:   strings.TrimSpace(record[11]),
+			OrderID:   strings.TrimSpace(record[col["order_id"]]),
 		})
 	}
 

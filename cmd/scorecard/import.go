@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"stock-scorecard/internal/cleandata"
 	"stock-scorecard/internal/dividend"
@@ -58,8 +59,12 @@ func runImport(args []string) {
 	if err != nil {
 		log.Fatalf("  ✗ parse tradebooks: %v", err)
 	}
+	// Prefer --client flag over auto-detected ID from filenames
+	if *clientFlag != "" {
+		clientID = strings.ToUpper(*clientFlag)
+	}
 	if clientID == "" {
-		log.Fatalf("  ✗ Could not detect client ID from filenames (expected {clientID}_*.csv, e.g. BT2632_20200101_20201231.csv)")
+		log.Fatalf("  ✗ Could not detect client ID from filenames (expected {clientID}_*.csv, e.g. BT2632_20200101_20201231.csv). Use --client to specify.")
 	}
 
 	// Parse F&O (optional, same source directory)
@@ -357,6 +362,35 @@ func runNonInteractiveImport(
 		fmt.Printf("        stock-scorecard correct --input %s\n", reviewPath)
 		fmt.Println()
 	}
+
+	// ── Auto-run cockpit for unrealized portfolio ────────────
+	var cockpitData []byte
+	if len(open) > 0 {
+		fmt.Println("  ✓ Running cockpit for unrealized portfolio...")
+		cockpitArgs := []string{"--client", clientID, "--data", filepath.Dir(filepath.Dir(tradesPath)), "--source", sourceDir, "--skip-deep-dive"}
+		cockpitPath := filepath.Join(sourceDir, fmt.Sprintf("cockpit_%s.json", clientID))
+		cockpitArgs = append(cockpitArgs, "--output", cockpitPath)
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("  ! Cockpit failed: %v (scorecard still available)\n", r)
+				}
+			}()
+			runCockpit(cockpitArgs)
+			var readErr error
+			cockpitData, readErr = os.ReadFile(cockpitPath)
+			if readErr != nil {
+				fmt.Printf("  ! Could not read cockpit JSON: %v\n", readErr)
+			}
+		}()
+	}
+
+	// ── Auto-view in browser ─────────────────────────────────
+	scorecardData, err := os.ReadFile(scorecardPath)
+	if err != nil {
+		log.Fatalf("  ✗ read scorecard for viewer: %v", err)
+	}
+	startViewServer(scorecardData, cockpitData, clientID)
 }
 
 func runInteractiveImport(

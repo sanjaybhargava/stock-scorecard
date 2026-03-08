@@ -9,8 +9,9 @@ import (
 )
 
 // clientIDRe matches a Zerodha client ID at the start of a filename:
-// two uppercase letters followed by one or more digits, then underscore.
-var clientIDRe = regexp.MustCompile(`^([A-Z]{2}\d+)_`)
+// 2-3 uppercase letters followed by digits, then underscore.
+// Covers formats like BT2632, ZY7393, DUA527, etc.
+var clientIDRe = regexp.MustCompile(`^([A-Z]{2,3}\d+)_`)
 
 // Extract parses the client ID from a list of filenames (basenames).
 // Returns the client ID if exactly one is found. Returns an error if
